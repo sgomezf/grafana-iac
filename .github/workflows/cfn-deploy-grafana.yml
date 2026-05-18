@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - "grafana-workspace.yml"
+      - "cloudformation/grafana-workspace.yml"
       - ".github/workflows/deploy-grafana.yml"
   workflow_dispatch:
     inputs:
