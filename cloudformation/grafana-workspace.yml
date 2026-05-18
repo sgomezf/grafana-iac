@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Amazon Managed Grafana Workspace with IAM Identity Center (SSO) authentication
+  and CloudWatch as a built-in data source.
+
+Parameters:
+  WorkspaceName:
+    Type: String
+    Default: MyGrafanaWorkspace
+    Description: Name for the Grafana workspace
+
+  WorkspaceDescription:
+    Type: String
+    Default: Managed Grafana workspace deployed via CloudFormation
+    Description: Description for the Grafana workspace
+
+  GrafanaVersion:
+    Type: String
+    Default: "10.4"
+    AllowedValues:
+      - "9.4"
+      - "10.4"
+    Description: Grafana version to use
+
+  OrganizationRoleName:
+    Type: String
+    Default: ADMIN
+    AllowedValues:
+      - ADMIN
+      - EDITOR
+      - VIEWER
+    Description: Default role for organization members in the workspace
+
+Resources:
+  # -------------------------------------------------------
+  # IAM role that Grafana assumes to access AWS data sources
+  # -------------------------------------------------------
+  GrafanaWorkspaceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${WorkspaceName}-GrafanaRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: grafana.amazonaws.com
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+      ManagedPolicyArns:
+        # Grants read-only access to CloudWatch metrics and logs
+        - arn:aws:iam::aws:policy/AmazonGrafanaCloudWatchAccess
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # -------------------------------------------------------
+  # Amazon Managed Grafana Workspace
+  # -------------------------------------------------------
+  GrafanaWorkspace:
+    Type: AWS::Grafana::Workspace
+    Properties:
+      Name: !Ref WorkspaceName
+      Description: !Ref WorkspaceDescription
+      GrafanaVersion: !Ref GrafanaVersion
+
+      # Authentication: IAM Identity Center (SSO)
+      AuthenticationProviders:
+        - AWS_SSO
+
+      # Permission type: SERVICE_MANAGED lets Grafana manage IAM roles
+      PermissionType: CUSTOMER_MANAGED
+      RoleArn: !GetAtt GrafanaWorkspaceRole.Arn
+
+      # Built-in AWS data sources
+      DataSources:
+        - CLOUDWATCH
+        - XRAY
+
+      # Notification channels available in the workspace
+      NotificationDestinations:
+        - SNS
+
+      # Organization membership defaults
+      OrganizationRoleName: !Ref OrganizationRoleName
+      AccountAccessType: CURRENT_ACCOUNT
+
+      Tags:
+        ManagedBy: CloudFormation
+        WorkspaceName: !Ref WorkspaceName
+
+# -------------------------------------------------------
+# Outputs
+# -------------------------------------------------------
+Outputs:
+  WorkspaceId:
+    Description: The ID of the Grafana workspace
+    Value: !Ref GrafanaWorkspace
+    Export:
+      Name: !Sub "${AWS::StackName}-WorkspaceId"
+
+  WorkspaceEndpoint:
+    Description: The endpoint URL of the Grafana workspace
+    Value: !Sub "https://${GrafanaWorkspace.Endpoint}"
+    Export:
+      Name: !Sub "${AWS::StackName}-WorkspaceEndpoint"
+
+  WorkspaceArn:
+    Description: The ARN of the Grafana workspace
+    Value: !GetAtt GrafanaWorkspace.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-WorkspaceArn"
+
+  GrafanaRoleArn:
+    Description: IAM role ARN assumed by the Grafana workspace
+    Value: !GetAtt GrafanaWorkspaceRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-GrafanaRoleArn"
