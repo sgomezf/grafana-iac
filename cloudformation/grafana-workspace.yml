@@ -90,6 +90,7 @@ Resources:
       Tags:
         ManagedBy: CloudFormation
         WorkspaceName: !Ref WorkspaceName
+        costcenter: ABC123
 
 # -------------------------------------------------------
 # Outputs
