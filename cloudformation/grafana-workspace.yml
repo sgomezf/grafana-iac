@@ -100,14 +100,3 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-WorkspaceEndpoint"
 
-  WorkspaceArn:
-    Description: The ARN of the Grafana workspace
-    Value: !GetAtt GrafanaWorkspace.Arn
-    Export:
-      Name: !Sub "${AWS::StackName}-WorkspaceArn"
-
-  GrafanaRoleArn:
-    Description: IAM role ARN assumed by the Grafana workspace
-    Value: !GetAtt GrafanaWorkspaceRole.Arn
-    Export:
-      Name: !Sub "${AWS::StackName}-GrafanaRoleArn"
