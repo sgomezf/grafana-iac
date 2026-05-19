@@ -18,6 +18,7 @@ Parameters:
     Type: String
     Default: "12.4"
     AllowedValues:
+      - "9.4"
       - "10.4"
       - "12.4"
     Description: Grafana version to use
