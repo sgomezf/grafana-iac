@@ -83,7 +83,7 @@ Resources:
 
       # Organization membership defaults
       OrganizationRoleName: !Ref OrganizationRoleName
-      AccountAccessType: CURRENT_ACCOUNT
+      AccountAccessType: ORGANIZATION
   
 # -------------------------------------------------------
 # Outputs
