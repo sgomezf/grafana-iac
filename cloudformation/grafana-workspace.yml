@@ -59,63 +59,62 @@ Resources:
   # -------------------------------------------------------
   # Amazon Managed Grafana Workspace
   # -------------------------------------------------------
-  GrafanaWorkspace:
-    Type: AWS::Grafana::Workspace
-    Properties:
-      Name: !Ref WorkspaceName
-      Description: !Ref WorkspaceDescription
-      GrafanaVersion: !Ref GrafanaVersion
+  # GrafanaWorkspace:
+  #   Type: AWS::Grafana::Workspace
+  #   Properties:
+  #     Name: !Ref WorkspaceName
+  #     Description: !Ref WorkspaceDescription
+  #     GrafanaVersion: !Ref GrafanaVersion
 
-      # Authentication: IAM Identity Center (SSO)
-      AuthenticationProviders:
-        - AWS_SSO
+  #     # Authentication: IAM Identity Center (SSO)
+  #     AuthenticationProviders:
+  #       - AWS_SSO
 
-      # Permission type: SERVICE_MANAGED lets Grafana manage IAM roles
-      PermissionType: CUSTOMER_MANAGED
-      RoleArn: !GetAtt GrafanaWorkspaceRole.Arn
+  #     # Permission type: SERVICE_MANAGED lets Grafana manage IAM roles
+  #     PermissionType: CUSTOMER_MANAGED
+  #     RoleArn: !GetAtt GrafanaWorkspaceRole.Arn
 
-      # Built-in AWS data sources
-      DataSources:
-        - CLOUDWATCH
-        - XRAY
+  #     # Built-in AWS data sources
+  #     DataSources:
+  #       - CLOUDWATCH
+  #       - XRAY
 
-      # Notification channels available in the workspace
-      NotificationDestinations:
-        - SNS
+  #     # Notification channels available in the workspace
+  #     NotificationDestinations:
+  #       - SNS
 
-      # Organization membership defaults
-      OrganizationRoleName: !Ref OrganizationRoleName
-      AccountAccessType: CURRENT_ACCOUNT
+  #     # Organization membership defaults
+  #     OrganizationRoleName: !Ref OrganizationRoleName
+  #     AccountAccessType: CURRENT_ACCOUNT
 
-      Tags:
-        ManagedBy: CloudFormation
-        WorkspaceName: !Ref WorkspaceName
-        costcenter: ABC123
-
+  #     Tags:
+  #       ManagedBy: CloudFormation
+  #       WorkspaceName: !Ref WorkspaceName
+  
 # -------------------------------------------------------
 # Outputs
 # -------------------------------------------------------
-Outputs:
-  WorkspaceId:
-    Description: The ID of the Grafana workspace
-    Value: !Ref GrafanaWorkspace
-    Export:
-      Name: !Sub "${AWS::StackName}-WorkspaceId"
+# Outputs:
+#   WorkspaceId:
+#     Description: The ID of the Grafana workspace
+#     Value: !Ref GrafanaWorkspace
+#     Export:
+#       Name: !Sub "${AWS::StackName}-WorkspaceId"
 
-  WorkspaceEndpoint:
-    Description: The endpoint URL of the Grafana workspace
-    Value: !Sub "https://${GrafanaWorkspace.Endpoint}"
-    Export:
-      Name: !Sub "${AWS::StackName}-WorkspaceEndpoint"
+#   WorkspaceEndpoint:
+#     Description: The endpoint URL of the Grafana workspace
+#     Value: !Sub "https://${GrafanaWorkspace.Endpoint}"
+#     Export:
+#       Name: !Sub "${AWS::StackName}-WorkspaceEndpoint"
 
-  WorkspaceArn:
-    Description: The ARN of the Grafana workspace
-    Value: !GetAtt GrafanaWorkspace.Arn
-    Export:
-      Name: !Sub "${AWS::StackName}-WorkspaceArn"
+#   WorkspaceArn:
+#     Description: The ARN of the Grafana workspace
+#     Value: !GetAtt GrafanaWorkspace.Arn
+#     Export:
+#       Name: !Sub "${AWS::StackName}-WorkspaceArn"
 
-  GrafanaRoleArn:
-    Description: IAM role ARN assumed by the Grafana workspace
-    Value: !GetAtt GrafanaWorkspaceRole.Arn
-    Export:
-      Name: !Sub "${AWS::StackName}-GrafanaRoleArn"
+#   GrafanaRoleArn:
+#     Description: IAM role ARN assumed by the Grafana workspace
+#     Value: !GetAtt GrafanaWorkspaceRole.Arn
+#     Export:
+#       Name: !Sub "${AWS::StackName}-GrafanaRoleArn"
