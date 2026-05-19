@@ -52,9 +52,6 @@ Resources:
       ManagedPolicyArns:
         # Grants read-only access to CloudWatch metrics and logs
         - arn:aws:iam::027934733062:policy/ROCloudWatch
-      Tags:
-        - Key: ManagedBy
-          Value: CloudFormation
 
   # -------------------------------------------------------
   # Amazon Managed Grafana Workspace
