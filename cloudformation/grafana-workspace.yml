@@ -68,8 +68,8 @@ Resources:
       AuthenticationProviders:
         - AWS_SSO
 
-      # Permission type: SERVICE_MANAGED lets Grafana manage IAM roles
-      PermissionType: CUSTOMER_MANAGED
+      # Permission type
+      PermissionType: SERVICE_MANAGED
       RoleArn: !GetAtt GrafanaWorkspaceRole.Arn
 
       # Built-in AWS data sources
@@ -83,7 +83,7 @@ Resources:
 
       # Organization membership defaults
       OrganizationRoleName: !Ref OrganizationRoleName
-      AccountAccessType: ORGANIZATION
+      AccountAccessType: CURRENT_ACCOUNT
   
 # -------------------------------------------------------
 # Outputs
