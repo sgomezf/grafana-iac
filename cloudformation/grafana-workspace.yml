@@ -83,10 +83,6 @@ Resources:
       # Organization membership defaults
       OrganizationRoleName: !Ref OrganizationRoleName
       AccountAccessType: CURRENT_ACCOUNT
-
-      Tags:
-        ManagedBy: CloudFormation
-        WorkspaceName: !Ref WorkspaceName
   
 # -------------------------------------------------------
 # Outputs
