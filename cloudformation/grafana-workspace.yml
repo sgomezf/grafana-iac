@@ -51,7 +51,7 @@ Resources:
                 aws:SourceAccount: !Ref AWS::AccountId
       ManagedPolicyArns:
         # Grants read-only access to CloudWatch metrics and logs
-        - arn:aws:iam::aws:policy/AmazonGrafanaCloudWatchAccess
+        - arn:aws:iam::027934733062:policy/ROCloudWatch
       Tags:
         - Key: ManagedBy
           Value: CloudFormation
