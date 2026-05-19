@@ -34,7 +34,7 @@ concurrency:
 
 env:
   AWS_REGION: us-east-2
-  STACK_NAME: grafana-workspace-${{ github.event.inputs.environment || 'development' }}
+  STACK_NAME: grafana-${{ github.event.inputs.environment || 'development' }}
   TEMPLATE_FILE: cloudformation/grafana-workspace.yml
 
 jobs:
