@@ -244,6 +244,7 @@ Resources:
 
           def create_key(workspace_id):
               """Call AWS API to create a Grafana workspace API key and store in SSM."""
+              time.sleep(30)  # Ensure workspace is fully active before key creation attempt
               print(f"Creating API key '{KEY_NAME}' for workspace {workspace_id}")
               resp = grafana_client.create_workspace_api_key(
                   keyName        = KEY_NAME,
