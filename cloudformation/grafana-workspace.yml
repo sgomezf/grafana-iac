@@ -146,7 +146,7 @@ Resources:
       # Notification channels available in the workspace
       NotificationDestinations:
         - SNS
-      En
+        
       # Enables plugins installation
       PluginAdminEnabled: true
 
