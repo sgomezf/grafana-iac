@@ -34,6 +34,7 @@ Parameters:
 
   AlertEmailAddress:
     Type: String
+    Default: sgomez@gmail.com
     Description: Email address to receive SNS alert notifications
     AllowedPattern: "^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$"
 
