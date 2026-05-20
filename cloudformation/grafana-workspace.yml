@@ -391,6 +391,52 @@ Resources:
                   cfnresponse.send(event, context, cfnresponse.SUCCESS,
                                    {"Message": "Notification channel deleted (best-effort)"})
 
+  # Custom Plugin — trigger plugin installer
+  GrafanaPlugins:
+    Type: Custom::GrafanaPlugins
+    DependsOn:
+      - GrafanaWorkspace
+      - GrafanaApiKeyParameter
+    Properties:
+      ServiceToken: !GetAtt GrafanaPluginInstallerFunction.Arn
+      PluginIds: !Join [",", !Ref PluginIds]
+      # Changing this value forces re-execution on stack update
+      WorkspaceId: !Ref GrafanaWorkspace
+
+  # Custom Resource — trigger notification channel creation
+  GrafanaNotificationChannel:
+    Type: Custom::GrafanaNotificationChannel
+    DependsOn:
+      - GrafanaWorkspace
+      - GrafanaApiKeyParameter
+      - GrafanaAlertTopic
+    Properties:
+      ServiceToken: !GetAtt GrafanaNotificationChannelFunction.Arn
+      WorkspaceId: !Ref GrafanaWorkspace
+      SnsTopicArn: !Ref GrafanaAlertTopic
+
+  # CloudWatch Alarm — alert if Lambda custom resource errors
+  PluginInstallerErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${WorkspaceName}-plugin-installer-errors"
+      AlarmDescription: Grafana plugin installer Lambda encountered errors
+      Namespace: AWS/Lambda
+      MetricName: Errors
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref GrafanaPluginInstallerFunction
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref GrafanaAlertTopic
+      OKActions:
+        - !Ref GrafanaAlertTopic
+
 
 
 # Outputs
