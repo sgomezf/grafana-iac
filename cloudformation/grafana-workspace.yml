@@ -146,13 +146,14 @@ Resources:
       # Notification channels available in the workspace
       NotificationDestinations:
         - SNS
-        
-      # Enables plugins installation
-      PluginAdminEnabled: true
 
       # Organization membership defaults
       OrganizationRoleName: !Ref OrganizationRoleName
       AccountAccessType: CURRENT_ACCOUNT
+
+      # Enables plugins installation
+      PluginAdminEnabled: true
+
 
   # SSM Parameter — store API key securely for Lambda to read
   GrafanaApiKeyParameter:
