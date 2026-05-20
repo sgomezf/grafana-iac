@@ -260,10 +260,6 @@ Resources:
                   Type        = "SecureString",
                   Overwrite   = True,
                   Description = f"Grafana Admin API key for workspace {workspace_id}",
-                  Tags        = [
-                      {"Key": "ManagedBy",      "Value": "CloudFormation"},
-                      {"Key": "WorkspaceId",    "Value": workspace_id},
-                  ],
               )
               print(f"API key stored at SSM path: {SSM_PATH}")
               return api_key
