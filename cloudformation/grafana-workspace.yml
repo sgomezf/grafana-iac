@@ -196,22 +196,6 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-
-# Outputs
-
-Outputs:
-  WorkspaceId:
-    Description: The ID of the Grafana workspace
-    Value: !Ref GrafanaWorkspace
-    Export:
-      Name: !Sub "${AWS::StackName}-WorkspaceId"
-
-  WorkspaceEndpoint:
-    Description: The endpoint URL of the Grafana workspace
-    Value: !Sub "https://${GrafanaWorkspace.Endpoint}"
-    Export:
-      Name: !Sub "${AWS::StackName}-WorkspaceEndpoint"
-
   GrafanaPluginInstallerFunction:
     Type: AWS::Lambda::Function
     DependsOn: GrafanaWorkspace
@@ -311,3 +295,20 @@ Outputs:
               else:
                   cfnresponse.send(event, context, cfnresponse.SUCCESS,
                                    {"Message": f"Plugins processed: {[p['plugin'] for p in results]}"})
+
+
+# Outputs
+
+Outputs:
+  WorkspaceId:
+    Description: The ID of the Grafana workspace
+    Value: !Ref GrafanaWorkspace
+    Export:
+      Name: !Sub "${AWS::StackName}-WorkspaceId"
+
+  WorkspaceEndpoint:
+    Description: The endpoint URL of the Grafana workspace
+    Value: !Sub "https://${GrafanaWorkspace.Endpoint}"
+    Export:
+      Name: !Sub "${AWS::StackName}-WorkspaceEndpoint"
+
