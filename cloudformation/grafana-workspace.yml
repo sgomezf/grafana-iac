@@ -151,6 +151,52 @@ Resources:
       OrganizationRoleName: !Ref OrganizationRoleName
       AccountAccessType: CURRENT_ACCOUNT
 
+  # SSM Parameter — store API key securely for Lambda to read
+  GrafanaApiKeyParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Sub "/grafana/${WorkspaceName}/admin-api-key"
+      Type: String          # Use SecureString manually if needed (CFN limitation)
+      Value: !Ref GrafanaAdminApiKey
+      Description: Grafana Admin API key for custom resource Lambda
+      Tags:
+        ManagedBy: CloudFormation
+
+  # IAM Role — Lambda execution role for custom resources
+  CustomResourceLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${WorkspaceName}-CustomResourceLambdaRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: GrafanaCustomResourcePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: GrafanaDescribe
+                Effect: Allow
+                Action:
+                  - grafana:DescribeWorkspace
+                  - grafana:ListWorkspaces
+                Resource: "*"
+              - Sid: SSMGetApiKey
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/grafana/${WorkspaceName}/*"
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+
+
 # Outputs
 
 Outputs:
