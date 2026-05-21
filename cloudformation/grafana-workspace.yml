@@ -400,91 +400,91 @@ Resources:
           Value: CloudFormation
 
   # Lambda — Custom resource: create SNS notification channel
-  GrafanaNotificationChannelFunction:
-    Type: AWS::Lambda::Function
-    DependsOn: GrafanaWorkspace
-    Properties:
-      FunctionName: !Sub "${WorkspaceName}-notification-channel"
-      Runtime: python3.12
-      Handler: index.handler
-      Role: !GetAtt CustomResourceLambdaRole.Arn
-      Timeout: 120
-      Environment:
-        Variables:
-          WORKSPACE_ENDPOINT: !Sub "https://${GrafanaWorkspace.Endpoint}"
-          SSM_API_KEY_PATH:   !Sub "/grafana/${WorkspaceName}/admin-api-key"
-          SNS_TOPIC_ARN:      !Ref GrafanaAlertTopic
-      Code:
-        ZipFile: |
-          import json
-          import urllib.request
-          import urllib.error
-          import os
-          import boto3
-          import cfnresponse
+  # GrafanaNotificationChannelFunction:
+  #   Type: AWS::Lambda::Function
+  #   DependsOn: GrafanaWorkspace
+  #   Properties:
+  #     FunctionName: !Sub "${WorkspaceName}-notification-channel"
+  #     Runtime: python3.12
+  #     Handler: index.handler
+  #     Role: !GetAtt CustomResourceLambdaRole.Arn
+  #     Timeout: 120
+  #     Environment:
+  #       Variables:
+  #         WORKSPACE_ENDPOINT: !Sub "https://${GrafanaWorkspace.Endpoint}"
+  #         SSM_API_KEY_PATH:   !Sub "/grafana/${WorkspaceName}/admin-api-key"
+  #         SNS_TOPIC_ARN:      !Ref GrafanaAlertTopic
+  #     Code:
+  #       ZipFile: |
+  #         import json
+  #         import urllib.request
+  #         import urllib.error
+  #         import os
+  #         import boto3
+  #         import cfnresponse
 
-          def get_api_key():
-              ssm = boto3.client("ssm")
-              resp = ssm.get_parameter(Name=os.environ["SSM_API_KEY_PATH"], WithDecryption=True)
-              return resp["Parameter"]["Value"]
+  #         def get_api_key():
+  #             ssm = boto3.client("ssm")
+  #             resp = ssm.get_parameter(Name=os.environ["SSM_API_KEY_PATH"], WithDecryption=True)
+  #             return resp["Parameter"]["Value"]
 
-          def grafana_request(method, path, api_key, body=None):
-              url  = os.environ["WORKSPACE_ENDPOINT"].rstrip("/") + path
-              data = json.dumps(body).encode() if body else None
-              req  = urllib.request.Request(url, data=data, method=method, headers={
-                  "Authorization": f"Bearer {api_key}",
-                  "Content-Type":  "application/json",
-              })
-              try:
-                  with urllib.request.urlopen(req, timeout=30) as r:
-                      return r.status, json.loads(r.read())
-              except urllib.error.HTTPError as e:
-                  return e.code, json.loads(e.read())
+  #         def grafana_request(method, path, api_key, body=None):
+  #             url  = os.environ["WORKSPACE_ENDPOINT"].rstrip("/") + path
+  #             data = json.dumps(body).encode() if body else None
+  #             req  = urllib.request.Request(url, data=data, method=method, headers={
+  #                 "Authorization": f"Bearer {api_key}",
+  #                 "Content-Type":  "application/json",
+  #             })
+  #             try:
+  #                 with urllib.request.urlopen(req, timeout=30) as r:
+  #                     return r.status, json.loads(r.read())
+  #             except urllib.error.HTTPError as e:
+  #                 return e.code, json.loads(e.read())
 
-          def handler(event, context):
-              print("Event:", json.dumps(event))
-              request_type  = event["RequestType"]
-              sns_topic_arn = os.environ["SNS_TOPIC_ARN"]
-              physical_id   = event.get("PhysicalResourceId", "grafana-notification-channel")
+  #         def handler(event, context):
+  #             print("Event:", json.dumps(event))
+  #             request_type  = event["RequestType"]
+  #             sns_topic_arn = os.environ["SNS_TOPIC_ARN"]
+  #             physical_id   = event.get("PhysicalResourceId", "grafana-notification-channel")
 
-              try:
-                  api_key = get_api_key()
-              except Exception as e:
-                  cfnresponse.send(event, context, cfnresponse.FAILED,
-                      {"Message": f"Could not retrieve API key: {e}"})
-                  return
+  #             try:
+  #                 api_key = get_api_key()
+  #             except Exception as e:
+  #                 cfnresponse.send(event, context, cfnresponse.FAILED,
+  #                     {"Message": f"Could not retrieve API key: {e}"})
+  #                 return
 
-              if request_type in ("Create", "Update"):
-                  channel = {
-                      "name":        "SNS Alerts",
-                      "type":        "sns",
-                      "isDefault":   True,
-                      "sendReminder": True,
-                      "settings": {
-                          "topic":        sns_topic_arn,
-                          "authProvider": "default",
-                      },
-                  }
-                  status, body = grafana_request("POST", "/api/alert-notifications", api_key, channel)
-                  print(f"Create notification channel: {status} {body}")
-                  if status in (200, 201):
-                      channel_id = str(body.get("id", ""))
-                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
-                          {"ChannelId": channel_id}, channel_id)
-                  else:
-                      cfnresponse.send(event, context, cfnresponse.FAILED,
-                          {"Message": f"Failed: {status} {body}"}, physical_id)
+  #             if request_type in ("Create", "Update"):
+  #                 channel = {
+  #                     "name":        "SNS Alerts",
+  #                     "type":        "sns",
+  #                     "isDefault":   True,
+  #                     "sendReminder": True,
+  #                     "settings": {
+  #                         "topic":        sns_topic_arn,
+  #                         "authProvider": "default",
+  #                     },
+  #                 }
+  #                 status, body = grafana_request("POST", "/api/alert-notifications", api_key, channel)
+  #                 print(f"Create notification channel: {status} {body}")
+  #                 if status in (200, 201):
+  #                     channel_id = str(body.get("id", ""))
+  #                     cfnresponse.send(event, context, cfnresponse.SUCCESS,
+  #                         {"ChannelId": channel_id}, channel_id)
+  #                 else:
+  #                     cfnresponse.send(event, context, cfnresponse.FAILED,
+  #                         {"Message": f"Failed: {status} {body}"}, physical_id)
 
-              elif request_type == "Delete":
-                  if physical_id and physical_id != "grafana-notification-channel":
-                      status, body = grafana_request(
-                          "DELETE", f"/api/alert-notifications/{physical_id}", api_key)
-                      print(f"Delete notification channel {physical_id}: {status} {body}")
-                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physical_id)
+  #             elif request_type == "Delete":
+  #                 if physical_id and physical_id != "grafana-notification-channel":
+  #                     status, body = grafana_request(
+  #                         "DELETE", f"/api/alert-notifications/{physical_id}", api_key)
+  #                     print(f"Delete notification channel {physical_id}: {status} {body}")
+  #                 cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physical_id)
 
-      Tags:
-        - Key: ManagedBy
-          Value: CloudFormation
+  #     Tags:
+  #       - Key: ManagedBy
+  #         Value: CloudFormation
 
 
   # Custom Resource — triggers the API key generator Lambda.
@@ -508,13 +508,13 @@ Resources:
   #     PluginIds:    !Join [",", !Ref PluginIds]
 
   # Custom Resource — trigger notification channel creation
-  GrafanaNotificationChannel:
-    Type: Custom::GrafanaNotificationChannel
-    DependsOn: GrafanaApiKey
-    Properties:
-      ServiceToken: !GetAtt GrafanaNotificationChannelFunction.Arn
-      WorkspaceId:  !Ref GrafanaWorkspace
-      SnsTopicArn:  !Ref GrafanaAlertTopic
+  # GrafanaNotificationChannel:
+  #   Type: Custom::GrafanaNotificationChannel
+  #   DependsOn: GrafanaApiKey
+  #   Properties:
+  #     ServiceToken: !GetAtt GrafanaNotificationChannelFunction.Arn
+  #     WorkspaceId:  !Ref GrafanaWorkspace
+  #     SnsTopicArn:  !Ref GrafanaAlertTopic
 
   # CloudWatch Alarm — alert if Lambda custom resource errors
   PluginInstallerErrorAlarm:
