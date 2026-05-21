@@ -399,7 +399,7 @@ Resources:
         - Key: ManagedBy
           Value: CloudFormation
 
-  Lambda — Custom resource: create SNS notification channel
+  # Lambda — Custom resource: create SNS notification channel
   GrafanaNotificationChannelFunction:
     Type: AWS::Lambda::Function
     DependsOn: GrafanaWorkspace
