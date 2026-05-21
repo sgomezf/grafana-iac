@@ -88,8 +88,8 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy CloudFormation stack
-        id: deploy
+      - name: Deploy GrafanaCloudFormation stack
+        id: deploy-grafana
         run: |
           ENV="${{ github.event.inputs.environment || 'development' }}"
 
@@ -130,36 +130,27 @@ jobs:
           echo "🌐 Grafana Workspace URL: ${ENDPOINT}"
           echo "GRAFANA_URL=${ENDPOINT}" >> $GITHUB_ENV
 
-  # ------------------------------------------------------------------
-  # Delete the CloudFormation stack (manual trigger only)
-  # ------------------------------------------------------------------
-  delete:
-    name: Delete Stack
-    runs-on: ubuntu-latest
-    needs: validate
-    if: github.event.inputs.action == 'delete'
-    environment: ${{ github.event.inputs.environment || 'development' }}
-    permissions:
-      contents: read
+      # - name: Deploy Grafana Plugins stack
+      #   id: deploy-plugins
+      #   run: |
+      #     ENV="${{ github.event.inputs.environment || 'development' }}"
 
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
+      #     echo "🚀 Deploying stack: ${{ env.STACK_NAME }}"
 
-      - name: Delete CloudFormation stack
-        run: |
-          echo "🗑️  Deleting stack: ${{ env.STACK_NAME }}"
+      #     aws cloudformation deploy \
+      #       --template-file ${{ env.TEMPLATE_FILE }} \
+      #       --stack-name ${{ env.STACK_NAME }} \
+      #       --capabilities CAPABILITY_NAMED_IAM \
+      #       --no-fail-on-empty-changeset \
+      #       --parameter-overrides \
+      #         WorkspaceName="grafana-${ENV}" \
+      #         WorkspaceDescription="Grafana workspace for ${ENV} environment" \
+      #         GrafanaVersion="10.4" \
+      #         OrganizationRoleName="ADMIN" \
+      #       --tags \
+      #         Environment="${ENV}" \
+      #         ManagedBy="GitHubActions" \
+      #         Repository="${{ github.repository }}" \
+      #         Commit="${{ github.sha }}"
 
-          aws cloudformation delete-stack \
-            --stack-name ${{ env.STACK_NAME }}
-
-          echo "⏳ Waiting for stack deletion to complete..."
-
-          aws cloudformation wait stack-delete-complete \
-            --stack-name ${{ env.STACK_NAME }}
-
-          echo "✅ Stack deleted successfully"
+      #     echo "✅ Stack deployment complete"
