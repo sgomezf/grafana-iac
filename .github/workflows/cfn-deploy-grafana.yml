@@ -169,6 +169,7 @@ jobs:
               WorkspaceName="grafana-${ENV}" \
               AlertEmailAddress="${{ steps.deploy-grafana.outputs.AlertEmailAddress || 'selene.gomez@gmail.com' }}" \
               GrafanaAlertTopicName="${{ steps.deploy-grafana.outputs.GrafanaAlertTopicName || 'grafana-alerts' }}" \
+              GrafanaNotificationChannelFunctionArn="${{ steps.deploy-grafana.outputs.GrafanaNotificationChannelFunctionArn }}" \
             --tags \
               Environment="${ENV}" \
               ManagedBy="GitHubActions" \

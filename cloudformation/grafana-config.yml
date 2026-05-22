@@ -24,6 +24,11 @@ Parameters:
     Default: arn:aws:lambda:us-west-2:123456789012:function:GrafanaPluginInstaller
     Description: ARN of the Lambda function that installs Grafana plugins
 
+  GrafanaNotificationChannelFunctionArn:
+    Type: String
+    Default: arn:aws:lambda:us-west-2:123456789012:function:GrafanaNotificationChannel
+    Description: ARN of the Lambda function that configures Grafana notification channels
+
   # Comma-separated list of Grafana plugin IDs to install
   PluginIds:
     Type: CommaDelimitedList
@@ -33,7 +38,6 @@ Parameters:
 
 
 Resources:
-
 
   # Custom Resource — triggers the API key generator Lambda.
   GrafanaApiKey:
@@ -61,7 +65,7 @@ Resources:
     Properties:
       ServiceToken: !Ref GrafanaNotificationChannelFunctionArn
       WorkspaceId:  !Ref WorkspaceName
-      SnsTopicArn:  !Ref GrafanaAlertTopic
+      SnsTopicArn:  !Ref GrafanaAlertTopicName
 
   # CloudWatch Alarm — alert if Lambda custom resource errors
   PluginInstallerErrorAlarm:
@@ -81,7 +85,7 @@ Resources:
       ComparisonOperator: GreaterThanOrEqualToThreshold
       TreatMissingData:   notBreaching
       AlarmActions:
-        - !Ref GrafanaAlertTopic
+        - !Ref GrafanaAlertTopicName
       OKActions:
-        - !Ref GrafanaAlertTopic
+        - !Ref GrafanaAlertTopicName
 
