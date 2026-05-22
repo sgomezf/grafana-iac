@@ -67,7 +67,7 @@ Resources:
   PluginInstallerErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName:          !Sub "${GrafanaWorkspace}-plugin-installer-errors"
+      AlarmName:          "${GrafanaWorkspace}-plugin-installer-errors"
       AlarmDescription:   Grafana plugin installer Lambda encountered errors
       Namespace:          AWS/Lambda
       MetricName:         Errors
