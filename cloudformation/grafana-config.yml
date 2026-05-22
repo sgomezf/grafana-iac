@@ -40,7 +40,7 @@ Resources:
     Type: Custom::GrafanaApiKey
     Properties:
       ServiceToken: !Ref GrafanaApiKeyGeneratorFunctionArn
-      WorkspaceId:  !Ref GrafanaWorkspace
+      WorkspaceId:  !Ref WorkspaceName
       # Bump ApiKeyVersion to force key rotation on a future stack update
       ApiKeyVersion: "1"
 
@@ -51,7 +51,7 @@ Resources:
     DependsOn: GrafanaApiKey
     Properties:
       ServiceToken: !Ref GrafanaPluginInstallerFunctionArn
-      WorkspaceId:  !Ref GrafanaWorkspace
+      WorkspaceId:  !Ref WorkspaceName
       PluginIds:    !Join [",", !Ref PluginIds]
 
   # Custom Resource — trigger notification channel creation
@@ -60,14 +60,14 @@ Resources:
     DependsOn: GrafanaApiKey
     Properties:
       ServiceToken: !Ref GrafanaNotificationChannelFunctionArn
-      WorkspaceId:  !Ref GrafanaWorkspace
+      WorkspaceId:  !Ref WorkspaceName
       SnsTopicArn:  !Ref GrafanaAlertTopic
 
   # CloudWatch Alarm — alert if Lambda custom resource errors
   PluginInstallerErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName:          "${GrafanaWorkspace}-plugin-installer-errors"
+      AlarmName:          "${WorkspaceName}-plugin-installer-errors"
       AlarmDescription:   Grafana plugin installer Lambda encountered errors
       Namespace:          AWS/Lambda
       MetricName:         Errors
