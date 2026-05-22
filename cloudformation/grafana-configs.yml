@@ -13,6 +13,11 @@ Parameters:
     Default: selene.gomez@gmail.com
     Description: Email address to receive SNS alert notifications
     AllowedPattern: "^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$"
+  
+  GrafanaAlertTopicName:
+    Type: String
+    Default: grafana-alerts
+    Description: Name for the SNS topic to receive Grafana alert notifications
 
   GrafanaApiKeyGeneratorFunctionArn:
     Type: String

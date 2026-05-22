@@ -34,8 +34,10 @@ concurrency:
 
 env:
   AWS_REGION: us-east-2
-  STACK_NAME: grafana-${{ github.event.inputs.environment || 'development' }}
-  TEMPLATE_FILE: cloudformation/grafana-workspace.yml
+  GRAFANA_STACK_NAME: grafana-${{ github.event.inputs.environment || 'development' }}
+  GRAFANA_TEMPLATE_FILE: cloudformation/grafana-workspace.yml
+  CONFIG_STACK_NAME: grafana-${{ github.event.inputs.environment || 'development' }}
+  CONFIG_TEMPLATE_FILE: cloudformation/grafana-config.yml
 
 jobs:
   # ------------------------------------------------------------------
@@ -66,10 +68,10 @@ jobs:
           echo "✅ Template validation passed"
 
   # ------------------------------------------------------------------
-  # Deploy (create or update) the CloudFormation stack
+  # Deploy (create or update) the Gragana CloudFormation stack
   # ------------------------------------------------------------------
-  deploy:
-    name: Deploy Stack
+  deploy-grafana:
+    name: Deploy Grafana Workspace
     runs-on: ubuntu-latest
     needs: validate
     if: github.event.inputs.action != 'delete'
@@ -104,17 +106,17 @@ jobs:
         run: |
           ENV="${{ github.event.inputs.environment || 'development' }}"
 
-          echo "🚀 Deploying stack: ${{ env.STACK_NAME }}"
+          echo "🚀 Deploying stack: ${{ env.GRAFANA_STACK_NAME }}"
 
           aws cloudformation deploy \
-            --template-file ${{ env.TEMPLATE_FILE }} \
-            --stack-name ${{ env.STACK_NAME }} \
+            --template-file ${{ env.GRAFANA_TEMPLATE_FILE }} \
+            --stack-name ${{ env.GRAFANA_STACK_NAME }} \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
               WorkspaceName="grafana-${ENV}" \
               WorkspaceDescription="Grafana workspace for ${ENV} environment" \
-              GrafanaVersion="10.4" \
+              GrafanaVersion="12.4" \
               OrganizationRoleName="ADMIN" \
             --tags \
               Environment="${ENV}" \
@@ -128,36 +130,36 @@ jobs:
         run: |
           echo "📋 Stack Outputs:"
           aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
+            --stack-name ${{ env.GRAFANA_STACK_NAME }} \
             --query "Stacks[0].Outputs[*].{Key:OutputKey,Value:OutputValue}" \
             --output table
 
       - name: Print Grafana URL
         run: |
           ENDPOINT=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.STACK_NAME }} \
+            --stack-name ${{ env.GRAFANA_STACK_NAME }} \
             --query "Stacks[0].Outputs[?OutputKey=='WorkspaceEndpoint'].OutputValue" \
             --output text)
           echo "🌐 Grafana Workspace URL: ${ENDPOINT}"
           echo "GRAFANA_URL=${ENDPOINT}" >> $GITHUB_ENV
 
-      - name: Deploy Grafana Plugins stack
-        id: deploy-plugins
+      - name: Deploy Grafana Configuration stack
+        id: configure-grafana
         run: |
           ENV="${{ github.event.inputs.environment || 'development' }}"
 
-          echo "🚀 Deploying stack: ${{ env.STACK_NAME }}"
+          echo "🚀 Deploying stack: ${{ env.CONFIG_STACK_NAME }}"
 
           aws cloudformation deploy \
-            --template-file ${{ env.TEMPLATE_FILE }} \
-            --stack-name ${{ env.STACK_NAME }} \
+            --template-file ${{ env.CONFIG_TEMPLATE_FILE }} \
+            --stack-name ${{ env.CONFIG_STACK_NAME }} \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
+              GrafanaApiKeyGeneratorFunctionArn="${{ steps.deploy-grafana.outputs.GrafanaApiKeyGeneratorFunctionArn }}" \
               WorkspaceName="grafana-${ENV}" \
-              WorkspaceDescription="Installation plugins for ${ENV} environment" \
-              GrafanaVersion="10.4" \
-              OrganizationRoleName="ADMIN" \
+              AlertEmailAddress="${{ steps.deploy-grafana.outputs.AlertEmailAddress || 'selene.gomez@gmail.com' }}" \
+              GrafanaAlertTopicName="${{ steps.deploy-grafana.outputs.GrafanaAlertTopicName || 'grafana-alerts' }}" \
             --tags \
               Environment="${ENV}" \
               ManagedBy="GitHubActions" \
@@ -165,3 +167,6 @@ jobs:
               Commit="${{ github.sha }}"
 
           echo "✅ Stack deployment complete"
+
+
+
