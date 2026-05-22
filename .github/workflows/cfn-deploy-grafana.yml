@@ -170,6 +170,8 @@ jobs:
               AlertEmailAddress="${{ steps.deploy-grafana.outputs.AlertEmailAddress || 'selene.gomez@gmail.com' }}" \
               GrafanaAlertTopicName="${{ steps.deploy-grafana.outputs.GrafanaAlertTopicName || 'grafana-alerts' }}" \
               GrafanaNotificationChannelFunctionArn="${{ steps.deploy-grafana.outputs.GrafanaNotificationChannelFunctionArn }}" \
+              GrafanaPluginInstallerFunctionArn="${{ steps.deploy-grafana.outputs.GrafanaPluginInstallerFunctionArn }}" \
+              PluginIds="grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel,camptocamp-prometheus-alertmanager-datasource" \
             --tags \
               Environment="${ENV}" \
               ManagedBy="GitHubActions" \

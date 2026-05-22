@@ -29,6 +29,11 @@ Parameters:
     Default: arn:aws:lambda:us-west-2:123456789012:function:GrafanaNotificationChannel
     Description: ARN of the Lambda function that configures Grafana notification channels
 
+  GrafanaPluginInstallerFunctionArn:
+    Type: String
+    Default: arn:aws:lambda:us-west-2:123456789012:function:GrafanaPluginInstaller
+    Description: ARN of the Lambda function that installs Grafana plugins
+
   # Comma-separated list of Grafana plugin IDs to install
   PluginIds:
     Type: CommaDelimitedList
