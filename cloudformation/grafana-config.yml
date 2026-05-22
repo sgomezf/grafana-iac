@@ -82,7 +82,7 @@ Resources:
       MetricName:         Errors
       Dimensions:
         - Name:  FunctionName
-          Value: !Ref GrafanaPluginInstallerFunction
+          Value: !Ref GrafanaPluginInstallerFunctionArn
       Statistic:          Sum
       Period:             300
       EvaluationPeriods:  1
