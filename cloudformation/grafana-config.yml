@@ -40,7 +40,7 @@ Resources:
     Type: Custom::GrafanaApiKey
     DependsOn: GrafanaWorkspace
     Properties:
-      ServiceToken: !GetAtt GrafanaApiKeyGeneratorFunction.Arn
+      ServiceToken: !Ref GrafanaApiKeyGeneratorFunctionArn
       WorkspaceId:  !Ref GrafanaWorkspace
       # Bump ApiKeyVersion to force key rotation on a future stack update
       ApiKeyVersion: "1"
@@ -51,7 +51,7 @@ Resources:
     Type: Custom::GrafanaPlugins
     DependsOn: GrafanaApiKey
     Properties:
-      ServiceToken: !GetAtt GrafanaPluginInstallerFunction.Arn
+      ServiceToken: !Ref GrafanaPluginInstallerFunctionArn
       WorkspaceId:  !Ref GrafanaWorkspace
       PluginIds:    !Join [",", !Ref PluginIds]
 
@@ -60,7 +60,7 @@ Resources:
     Type: Custom::GrafanaNotificationChannel
     DependsOn: GrafanaApiKey
     Properties:
-      ServiceToken: !GetAtt GrafanaNotificationChannelFunction.Arn
+      ServiceToken: !Ref GrafanaNotificationChannelFunctionArn
       WorkspaceId:  !Ref GrafanaWorkspace
       SnsTopicArn:  !Ref GrafanaAlertTopic
 
