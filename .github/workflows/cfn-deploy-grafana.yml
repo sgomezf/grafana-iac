@@ -73,6 +73,17 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     if: github.event.inputs.action != 'delete'
+    outputs:
+      grafana_url: ${{ steps.deploy-grafana.outputs.WorkspaceEndpoint }}
+      workspace_id: ${{ steps.deploy-grafana.outputs.WorkspaceId }}
+      workspace_name: ${{ steps.deploy-grafana.outputs.WorkspaceName }}
+      workspace_endpoint: ${{ steps.deploy-grafana.outputs.WorkspaceEndpoint }}
+      alert_topic_arn: ${{ steps.deploy-grafana.outputs.AlertTopicArn }}
+      grafana_role_arn: ${{ steps.deploy-grafana.outputs.GrafanaRoleArn }}
+      api_key_ssm_path: ${{ steps.deploy-grafana.outputs.ApiKeySSMPath }}
+      grafana_plugin_installer_function_arn: ${{ steps.deploy-grafana.outputs.GrafanaPluginInstallerFunctionArn }}
+      grafana_api_key_generator_function_arn: ${{ steps.deploy-grafana.outputs.GrafanaApiKeyGeneratorFunctionArn }}
+
     environment: ${{ github.event.inputs.environment || 'development' }}
     permissions:
       contents: read
