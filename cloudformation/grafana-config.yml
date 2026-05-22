@@ -38,7 +38,6 @@ Resources:
   # Custom Resource — triggers the API key generator Lambda.
   GrafanaApiKey:
     Type: Custom::GrafanaApiKey
-    DependsOn: GrafanaWorkspace
     Properties:
       ServiceToken: !Ref GrafanaApiKeyGeneratorFunctionArn
       WorkspaceId:  !Ref GrafanaWorkspace
@@ -68,7 +67,7 @@ Resources:
   PluginInstallerErrorAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName:          !Sub "${WorkspaceName}-plugin-installer-errors"
+      AlarmName:          !Sub "${GrafanaWorkspace}-plugin-installer-errors"
       AlarmDescription:   Grafana plugin installer Lambda encountered errors
       Namespace:          AWS/Lambda
       MetricName:         Errors
