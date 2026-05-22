@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "cloudformation/grafana-workspace.yml"
+      - "cloudformation/grafana-config.yml"
       - ".github/workflows/cfn-deploy-grafana.yml"
   workflow_dispatch:
     inputs:
