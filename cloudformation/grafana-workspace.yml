@@ -53,24 +53,6 @@ Parameters:
   #   Default: "grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel,camptocamp-prometheus-alertmanager-datasource"
   #   Description: Comma-separated Grafana plugin IDs to install in the workspace
 
-  DashboardsBucketName:
-    Type: String
-    Description: >
-      S3 bucket name for Grafana dashboard JSON files. GitHub Actions syncs
-      .json files here, then bumps DashboardsVersion to trigger a reload.
-
-  DashboardsBucketPrefix:
-    Type: String
-    Default: "dashboards/"
-    Description: S3 key prefix to scan for .json dashboard files
-
-  DashboardsVersion:
-    Type: String
-    Default: "1"
-    Description: >
-      Increment to force the GrafanaDashboards custom resource to re-run
-      and reload all dashboards from S3 into Grafana.
-
 Resources:
   # IAM role that Grafana assumes to access AWS data sources
   GrafanaWorkspaceRole:
@@ -170,62 +152,6 @@ Resources:
 
       # Enables plugins installation
       PluginAdminEnabled: true
-
-  # S3 Bucket — stores Grafana dashboard JSON files
-  GrafanaDashboardsBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Ref DashboardsBucketName
-      AccessControl: Private
-      VersioningConfiguration:
-        Status: Enabled
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-      LifecycleConfiguration:
-        Rules:
-          - Id: DeleteOldVersions
-            Status: Enabled
-            NoncurrentVersionExpirationInDays: 30
-      PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
-        IgnorePublicAcls: true
-        RestrictPublicBuckets: true
-      Tags:
-        - Key: ManagedBy
-          Value: CloudFormation
-        - Key: WorkspaceName
-          Value: !Ref WorkspaceName
-
-  GrafanaDashboardsBucketPolicy:
-    Type: AWS::S3::BucketPolicy
-    Properties:
-      Bucket: !Ref GrafanaDashboardsBucket
-      PolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Sid: AllowLambdaRead
-            Effect: Allow
-            Principal:
-              AWS: !GetAtt CustomResourceLambdaRole.Arn
-            Action:
-              - s3:GetObject
-              - s3:ListBucket
-            Resource:
-              - !GetAtt GrafanaDashboardsBucket.Arn
-              - !Sub "${GrafanaDashboardsBucket.Arn}/*"
-          - Sid: DenyInsecureTransport
-            Effect: Deny
-            Principal: "*"
-            Action: s3:*
-            Resource:
-              - !GetAtt GrafanaDashboardsBucket.Arn
-              - !Sub "${GrafanaDashboardsBucket.Arn}/*"
-            Condition:
-              Bool:
-                aws:SecureTransport: false
 
   # SSM Parameter — store API key securely for Lambda to read
   GrafanaApiKeyParameter:
