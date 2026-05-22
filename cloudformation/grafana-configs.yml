@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Custom CloudFormation template to install Grafana plugins and configure an SNS notification channel in an Amazon Managed Grafana workspace. This template includes custom resources backed by Lambda functions to manage the Grafana API key lifecycle, plugin installation, and notification channel setup.
+
+Parameters:
+  WorkspaceName:
+    Type: String
+    Default: MyGrafanaWorkspace
+    Description: Name for the Grafana workspace
+
+  AlertEmailAddress:
+    Type: String
+    Default: selene.gomez@gmail.com
+    Description: Email address to receive SNS alert notifications
+    AllowedPattern: "^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$"
+
+  GrafanaApiKeyGeneratorFunctionArn:
+    Type: String
+    Default: arn:aws:lambda:us-west-2:123456789012:function:GrafanaPluginInstaller
+    Description: ARN of the Lambda function that installs Grafana plugins
+
+  # Comma-separated list of Grafana plugin IDs to install
+  PluginIds:
+    Type: CommaDelimitedList
+    Default: "grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel,camptocamp-prometheus-alertmanager-datasource"
+    Description: Comma-separated Grafana plugin IDs to install in the workspace
+
+
+
+Resources:
+
+  # Lambda — Custom resource: install Grafana plugins
+  GrafanaPluginInstallerFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: GrafanaWorkspace
+    Properties:
+      FunctionName: !Sub "${WorkspaceName}-plugin-installer"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt CustomResourceLambdaRole.Arn
+      Timeout: 300
+      Environment:
+        Variables:
+          WORKSPACE_ENDPOINT: !Sub "https://${GrafanaWorkspace.Endpoint}"
+          SSM_API_KEY_PATH:   !Sub "/grafana/${WorkspaceName}/admin-api-key"
+      Code:
+        ZipFile: |
+          import json
+          import urllib.request
+          import urllib.error
+          import os
+          import boto3
+          import cfnresponse
+
+          def get_api_key():
+              ssm = boto3.client("ssm")
+              resp = ssm.get_parameter(Name=os.environ["SSM_API_KEY_PATH"], WithDecryption=True)
+              return resp["Parameter"]["Value"]
+
+          def grafana_request(method, path, api_key, body=None):
+              url  = os.environ["WORKSPACE_ENDPOINT"].rstrip("/") + path
+              data = json.dumps(body).encode() if body else None
+              req  = urllib.request.Request(url, data=data, method=method, headers={
+                  "Authorization": f"Bearer {api_key}",
+                  "Content-Type":  "application/json",
+              })
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      return r.status, json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read())
+
+          def handler(event, context):
+              print("Event:", json.dumps(event))
+              request_type = event["RequestType"]
+              props        = event.get("ResourceProperties", {})
+              plugins      = props.get("PluginIds", "")
+              if isinstance(plugins, str):
+                  plugins = [p.strip() for p in plugins.split(",") if p.strip()]
+
+              try:
+                  api_key = get_api_key()
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED,
+                      {"Message": f"Could not retrieve API key: {e}"})
+                  return
+
+              errors = []
+              if request_type in ("Create", "Update"):
+                  for plugin_id in plugins:
+                      status, body = grafana_request("POST", f"/api/plugins/{plugin_id}/install", api_key)
+                      print(f"Install {plugin_id}: {status} {body}")
+                      if status not in (200, 201, 409):   # 409 = already installed
+                          errors.append({"plugin": plugin_id, "status": status})
+              elif request_type == "Delete":
+                  for plugin_id in plugins:
+                      status, body = grafana_request("POST", f"/api/plugins/{plugin_id}/uninstall", api_key)
+                      print(f"Uninstall {plugin_id}: {status} {body}")
+
+              if errors:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Errors": errors})
+              else:
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                      {"Message": f"Plugins processed: {plugins}"})
+
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Custom Resource — triggers the API key generator Lambda.
+  GrafanaApiKey:
+    Type: Custom::GrafanaApiKey
+    DependsOn: GrafanaWorkspace
+    Properties:
+      ServiceToken: !GetAtt GrafanaApiKeyGeneratorFunction.Arn
+      WorkspaceId:  !Ref GrafanaWorkspace
+      # Bump ApiKeyVersion to force key rotation on a future stack update
+      ApiKeyVersion: "1"
+
+
+  # Custom Plugin — trigger plugin installer
+  GrafanaPlugins:
+    Type: Custom::GrafanaPlugins
+    DependsOn: GrafanaApiKey
+    Properties:
+      ServiceToken: !GetAtt GrafanaPluginInstallerFunction.Arn
+      WorkspaceId:  !Ref GrafanaWorkspace
+      PluginIds:    !Join [",", !Ref PluginIds]
+
+  # Custom Resource — trigger notification channel creation
+  GrafanaNotificationChannel:
+    Type: Custom::GrafanaNotificationChannel
+    DependsOn: GrafanaApiKey
+    Properties:
+      ServiceToken: !GetAtt GrafanaNotificationChannelFunction.Arn
+      WorkspaceId:  !Ref GrafanaWorkspace
+      SnsTopicArn:  !Ref GrafanaAlertTopic
+
+  # CloudWatch Alarm — alert if Lambda custom resource errors
+  PluginInstallerErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:          !Sub "${WorkspaceName}-plugin-installer-errors"
+      AlarmDescription:   Grafana plugin installer Lambda encountered errors
+      Namespace:          AWS/Lambda
+      MetricName:         Errors
+      Dimensions:
+        - Name:  FunctionName
+          Value: !Ref GrafanaPluginInstallerFunction
+      Statistic:          Sum
+      Period:             300
+      EvaluationPeriods:  1
+      Threshold:          1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData:   notBreaching
+      AlarmActions:
+        - !Ref GrafanaAlertTopic
+      OKActions:
+        - !Ref GrafanaAlertTopic
+

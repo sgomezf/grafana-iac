@@ -1,0 +1,333 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Standalone stack that loads Grafana dashboard JSON files from an S3 bucket
+  into an existing Amazon Managed Grafana workspace via a Lambda-backed
+  CloudFormation custom resource.
+
+Parameters:
+
+  GrafanaWorkspaceId:
+    Type: String
+    Description: >
+      ID of the existing Amazon Managed Grafana workspace (e.g. g-abc1234567).
+      Find it in the AWS Console under Amazon Grafana → Workspaces.
+
+  GrafanaWorkspaceEndpoint:
+    Type: String
+    Description: >
+      Full HTTPS endpoint of the Grafana workspace
+      (e.g. https://abc1234567.grafana-workspace.us-east-1.amazonaws.com).
+
+  GrafanaApiKeySSMPath:
+    Type: String
+    Description: >
+      SSM Parameter Store path that holds the Grafana Admin API key
+      (e.g. /grafana/my-workspace/admin-api-key).
+      The parameter must already exist and be readable by this stack's
+      Lambda execution role.
+
+  DashboardsBucketName:
+    Type: String
+    Description: >
+      Name of the existing S3 bucket that contains dashboard JSON files.
+      The bucket must already exist and contain at least one .json file
+      under DashboardsBucketPrefix.
+
+  DashboardsBucketPrefix:
+    Type: String
+    Default: "dashboards/"
+    Description: >
+      S3 key prefix (folder) to scan for .json dashboard files.
+      Must end with a trailing slash (e.g. dashboards/).
+
+  DashboardsVersion:
+    Type: String
+    Default: "1"
+    Description: >
+      Opaque version string. Increment this value on a stack update to
+      force CloudFormation to re-invoke the dashboard loader Lambda and
+      reload all dashboards from S3 into Grafana.
+
+  GrafanaFolderId:
+    Type: Number
+    Default: 0
+    Description: >
+      Grafana folder ID to import dashboards into.
+      0 = General (root) folder. Create a folder in Grafana first
+      and use its numeric ID if you want a dedicated folder.
+
+Resources:
+
+  # IAM Role — Lambda execution role
+  DashboardLoaderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "grafana-dashboard-loader-${GrafanaWorkspaceId}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DashboardLoaderPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+
+              # Read the Grafana API key from SSM
+              - Sid: SSMGetApiKey
+                Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GrafanaApiKeySSMPath}"
+
+              # Decrypt SSM SecureString values via the default AWS-managed key
+              - Sid: KMSDecryptSSM
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
+
+              # List and read dashboard JSON files from S3
+              - Sid: S3ListBucket
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:aws:s3:::${DashboardsBucketName}"
+                Condition:
+                  StringLike:
+                    s3:prefix: !Sub "${DashboardsBucketPrefix}*"
+
+              - Sid: S3GetDashboards
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub "arn:aws:s3:::${DashboardsBucketName}/${DashboardsBucketPrefix}*"
+
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: GrafanaWorkspaceId
+          Value: !Ref GrafanaWorkspaceId
+
+  
+  # Lambda — Dashboard loader
+  #
+  #  Lifecycle behaviour:
+  #    Create / Update  →  list all .json keys under the prefix,
+  #                        download each from S3, POST to Grafana
+  #                        /api/dashboards/db (overwrite=true).
+  #    Delete           →  read uid from each JSON, DELETE from
+  #                        Grafana /api/dashboards/uid/{uid}.
+  #
+  #  Idempotency: overwrite=true means re-running the Lambda with
+  #  the same files is safe — Grafana updates in place, no duplicates.
+  DashboardLoaderFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "grafana-dashboard-loader-${GrafanaWorkspaceId}"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt DashboardLoaderRole.Arn
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          WORKSPACE_ENDPOINT: !Ref GrafanaWorkspaceEndpoint
+          SSM_API_KEY_PATH:   !Ref GrafanaApiKeySSMPath
+          DASHBOARDS_BUCKET:  !Ref DashboardsBucketName
+          DASHBOARDS_PREFIX:  !Ref DashboardsBucketPrefix
+          FOLDER_ID:          !Ref GrafanaFolderId
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import urllib.request
+          import urllib.error
+          import boto3
+          import cfnresponse
+
+          s3  = boto3.client("s3")
+          ssm = boto3.client("ssm")
+
+          BUCKET   = os.environ["DASHBOARDS_BUCKET"]
+          PREFIX   = os.environ["DASHBOARDS_PREFIX"]
+          ENDPOINT = os.environ["WORKSPACE_ENDPOINT"].rstrip("/")
+          FOLDER   = int(os.environ.get("FOLDER_ID", "0"))
+
+          # ----------------------------------------------------------
+          def get_api_key():
+              resp = ssm.get_parameter(
+                  Name=os.environ["SSM_API_KEY_PATH"],
+                  WithDecryption=True,
+              )
+              return resp["Parameter"]["Value"]
+
+          # ----------------------------------------------------------
+          def grafana(method, path, api_key, body=None):
+              """Minimal Grafana HTTP API helper."""
+              data = json.dumps(body).encode() if body else None
+              req  = urllib.request.Request(
+                  ENDPOINT + path,
+                  data=data,
+                  method=method,
+                  headers={
+                      "Authorization": f"Bearer {api_key}",
+                      "Content-Type":  "application/json",
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      return r.status, json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read() or b"{}")
+
+          # ----------------------------------------------------------
+          def list_keys():
+              """Return all .json object keys under the configured prefix."""
+              paginator = s3.get_paginator("list_objects_v2")
+              keys = []
+              for page in paginator.paginate(Bucket=BUCKET, Prefix=PREFIX):
+                  for obj in page.get("Contents", []):
+                      if obj["Key"].endswith(".json"):
+                          keys.append(obj["Key"])
+              print(f"Found {len(keys)} dashboard file(s) under s3://{BUCKET}/{PREFIX}")
+              return keys
+
+          # ----------------------------------------------------------
+          def fetch_dashboard(key):
+              """Download and parse a dashboard JSON from S3."""
+              resp = s3.get_object(Bucket=BUCKET, Key=key)
+              return json.loads(resp["Body"].read())
+
+          # ----------------------------------------------------------
+          def import_dashboard(key, api_key):
+              """POST one dashboard to Grafana. Returns (success, uid, message)."""
+              dashboard_json = fetch_dashboard(key)
+
+              # Strip id so Grafana treats this as upsert-by-uid
+              dashboard_json.pop("id", None)
+
+              payload = {
+                  "dashboard": dashboard_json,
+                  "folderId":  FOLDER,
+                  "overwrite": True,
+                  "message":   "Loaded by CloudFormation custom resource",
+              }
+              status, body = grafana("POST", "/api/dashboards/db", api_key, payload)
+              uid     = body.get("uid", "")
+              msg     = body.get("status") or body.get("message", "")
+              success = status in (200, 201)
+
+              print(f"  {'OK' if success else 'FAIL'} [{status}] {key} → uid={uid} {msg}")
+              return success, uid, f"HTTP {status}: {msg}"
+
+          # ----------------------------------------------------------
+          def delete_dashboard(key, api_key):
+              """DELETE a dashboard from Grafana by its uid (read from S3 JSON)."""
+              try:
+                  dash = fetch_dashboard(key)
+                  uid  = dash.get("uid")
+                  if not uid:
+                      print(f"  SKIP {key} — no uid field, cannot delete")
+                      return
+                  status, body = grafana("DELETE", f"/api/dashboards/uid/{uid}", api_key)
+                  print(f"  DELETE uid={uid} → HTTP {status}")
+              except Exception as exc:
+                  # Best-effort on delete; don't fail the stack deletion
+                  print(f"  WARNING: could not delete dashboard from {key}: {exc}")
+
+          # ----------------------------------------------------------
+          def handler(event, context):
+              print("RequestType:", event["RequestType"])
+              physical_id = event.get("PhysicalResourceId", "grafana-dashboards")
+
+              try:
+                  api_key = get_api_key()
+              except Exception as exc:
+                  print(f"ERROR retrieving API key: {exc}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED,
+                      {"Message": str(exc)}, physical_id)
+                  return
+
+              request_type = event["RequestType"]
+
+              # ---- CREATE / UPDATE --------------------------------
+              if request_type in ("Create", "Update"):
+                  keys   = list_keys()
+                  errors = []
+                  uids   = []
+
+                  for key in keys:
+                      try:
+                          ok, uid, msg = import_dashboard(key, api_key)
+                          if ok:
+                              uids.append(uid)
+                          else:
+                              errors.append({"file": key, "error": msg})
+                      except Exception as exc:
+                          errors.append({"file": key, "error": str(exc)})
+
+                  if errors:
+                      cfnresponse.send(event, context, cfnresponse.FAILED,
+                          {"Message": "Some dashboards failed to load", "Errors": errors},
+                          physical_id)
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                          {"LoadedCount": len(uids), "UIDs": uids},
+                          physical_id)
+
+              # ---- DELETE -----------------------------------------
+              elif request_type == "Delete":
+                  for key in list_keys():
+                      delete_dashboard(key, api_key)
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                      {"Message": "Dashboards removed (best-effort)"}, physical_id)
+
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+        - Key: GrafanaWorkspaceId
+          Value: !Ref GrafanaWorkspaceId
+
+  # Custom Resource — triggers the Lambda on every stack event.
+  GrafanaDashboards:
+    Type: Custom::GrafanaDashboards
+    Properties:
+      ServiceToken:      !GetAtt DashboardLoaderFunction.Arn
+      # Changing any property below forces CloudFormation to call Update
+      WorkspaceId:       !Ref GrafanaWorkspaceId
+      DashboardsVersion: !Ref DashboardsVersion
+      BucketName:        !Ref DashboardsBucketName
+      BucketPrefix:      !Ref DashboardsBucketPrefix
+
+Outputs:
+
+  LambdaFunctionName:
+    Description: Name of the dashboard loader Lambda function
+    Value: !Ref DashboardLoaderFunction
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaFunctionName"
+
+  LambdaFunctionArn:
+    Description: ARN of the dashboard loader Lambda function
+    Value: !GetAtt DashboardLoaderFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LambdaFunctionArn"
+
+  DashboardLoaderRoleArn:
+    Description: IAM role ARN used by the dashboard loader Lambda
+    Value: !GetAtt DashboardLoaderRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-DashboardLoaderRoleArn"
+
+  LoadedFromBucket:
+    Description: S3 bucket and prefix dashboards are loaded from
+    Value: !Sub "s3://${DashboardsBucketName}/${DashboardsBucketPrefix}"
+    Export:
+      Name: !Sub "${AWS::StackName}-LoadedFromBucket"
