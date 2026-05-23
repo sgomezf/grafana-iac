@@ -40,9 +40,479 @@ Parameters:
     Default: "grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel,camptocamp-prometheus-alertmanager-datasource"
     Description: Comma-separated Grafana plugin IDs to install in the workspace
 
-
-
 Resources:
+
+  # IAM Role — Lambda execution role for custom resources
+  CustomResourceLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${WorkspaceName}-CustomResourceLambdaRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: GrafanaCustomResourcePolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # --- Grafana workspace + service account management (bootstrap only) ---
+              - Sid: GrafanaServiceAccountBootstrap
+                Effect: Allow
+                Action:
+                  - grafana:DescribeWorkspace
+                  - grafana:ListWorkspaces
+                  - grafana:CreateWorkspaceServiceAccount
+                  - grafana:DeleteWorkspaceServiceAccount
+                  - grafana:CreateWorkspaceServiceAccountToken
+                  - grafana:DeleteWorkspaceServiceAccountToken
+                Resource: !Sub "arn:aws:grafana:${AWS::Region}:${AWS::AccountId}:/workspaces/*"
+              # --- SSM: write & read the generated key ---
+              - Sid: SSMApiKeyAccess
+                Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                  - ssm:GetParameter
+                  - ssm:DeleteParameter
+                  - ssm:AddTagsToResource
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/grafana/${WorkspaceName}/*"
+              # --- KMS: needed to write SSM SecureString ---
+              - Sid: KMSForSSMSecureString
+                Effect: Allow
+                Action:
+                  - kms:GenerateDataKey
+                  - kms:Decrypt
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+
+# Lambda — Custom resource: manage Grafana API key lifecycle
+  GrafanaServiceAccountTokenFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: GrafanaWorkspace
+    Properties:
+      FunctionName: !Sub "${WorkspaceName}-sa-token-generator"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt CustomResourceLambdaRole.Arn
+      Timeout: 120
+      Environment:
+        Variables:
+          WORKSPACE_ENDPOINT:  !Sub "https://${GrafanaWorkspace.Endpoint}"
+          SSM_TOKEN_PATH:      !Sub "/grafana/${WorkspaceName}/admin-api-key"
+          SERVICE_ACCOUNT_NAME: "cfn-bootstrap-sa"
+          # Token TTL in seconds — 0 means no expiry (recommended for automation)
+          TOKEN_TTL_SECONDS:   "0"
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import urllib.request
+          import urllib.error
+          import boto3
+          import cfnresponse
+
+          ENDPOINT = os.environ["WORKSPACE_ENDPOINT"].rstrip("/")
+          SSM_PATH = os.environ["SSM_TOKEN_PATH"]
+          SA_NAME  = os.environ["SERVICE_ACCOUNT_NAME"]
+          TOKEN_TTL = int(os.environ["TOKEN_TTL_SECONDS"])
+
+          ssm = boto3.client("ssm")
+
+          # ── Grafana HTTP API helper ──────────────────────────────
+          def grafana(method, path, token=None, body=None):
+              """Make a Grafana HTTP API call. token=None for Basic auth bootstrap."""
+              data = json.dumps(body).encode() if body else None
+              headers = {"Content-Type": "application/json"}
+              if token:
+                  headers["Authorization"] = f"Bearer {token}"
+              req = urllib.request.Request(
+                  ENDPOINT + path, data=data, method=method, headers=headers)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      return r.status, json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read() or b"{}")
+
+          # ── SSM helpers ─────────────────────────────────────────
+          def store_token(token, workspace_id):
+              ssm.put_parameter(
+                  Name        = SSM_PATH,
+                  Value       = token,
+                  Type        = "SecureString",
+                  Overwrite   = True,
+                  Description = f"Grafana service account token for workspace {workspace_id}",
+                  Tags        = [
+                      {"Key": "ManagedBy",   "Value": "CloudFormation"},
+                      {"Key": "WorkspaceId", "Value": workspace_id},
+                  ],
+              )
+              print(f"Token stored at SSM path: {SSM_PATH}")
+
+          def delete_ssm():
+              try:
+                  ssm.delete_parameter(Name=SSM_PATH)
+                  print(f"Deleted SSM parameter: {SSM_PATH}")
+              except ssm.exceptions.ParameterNotFound:
+                  print("SSM parameter already gone — skipping")
+
+          def get_stored_token():
+              resp = ssm.get_parameter(Name=SSM_PATH, WithDecryption=True)
+              return resp["Parameter"]["Value"]
+
+          # ── Service account helpers ──────────────────────────────
+          def find_service_account(token):
+              """Return the id of the existing service account, or None."""
+              status, body = grafana("GET", "/api/serviceaccounts/search?query=" + SA_NAME, token)
+              if status == 200:
+                  for sa in body.get("serviceAccounts", []):
+                      if sa.get("name") == SA_NAME:
+                          return sa["id"]
+              return None
+
+          def create_service_account(token):
+              """Create service account and return its numeric id."""
+              print(f"Creating service account '{SA_NAME}'")
+              status, body = grafana("POST", "/api/serviceaccounts", token, {
+                  "name": SA_NAME,
+                  "role": "Admin",
+              })
+              if status not in (200, 201):
+                  raise RuntimeError(f"Failed to create service account: {status} {body}")
+              sa_id = body["id"]
+              print(f"Service account created — id={sa_id}")
+              return sa_id
+
+          def create_token(sa_id, token):
+              """Create a token on an existing service account and return the token string."""
+              print(f"Creating token for service account id={sa_id}")
+              payload = {"name": "cfn-token"}
+              if TOKEN_TTL > 0:
+                  payload["secondsToLive"] = TOKEN_TTL
+              status, body = grafana(
+                  "POST", f"/api/serviceaccounts/{sa_id}/tokens", token, payload)
+              if status not in (200, 201):
+                  raise RuntimeError(f"Failed to create token: {status} {body}")
+              new_token = body["key"]
+              print("Token created successfully")
+              return new_token
+
+          def delete_service_account(sa_id, token):
+              """Delete a service account by id (cascades token deletion)."""
+              print(f"Deleting service account id={sa_id}")
+              status, body = grafana("DELETE", f"/api/serviceaccounts/{sa_id}", token)
+              print(f"Delete service account: HTTP {status}")
+
+          # ── Bootstrap: get an initial admin token via AWS API ────
+          # Amazon Managed Grafana still exposes
+          # grafana:CreateWorkspaceServiceAccountToken at the AWS level
+          # for the initial bootstrap only. We use this ONCE to get a
+          # short-lived token, then immediately create a long-lived
+          # service account token via the Grafana HTTP API.
+          def bootstrap_token(workspace_id):
+              """Use AWS SDK to mint a short-lived bootstrap token (not stored)."""
+              client = boto3.client("grafana")
+              # Create a temporary service account at the AWS level for bootstrapping
+              try:
+                  sa_resp = client.create_workspace_service_account(
+                      workspaceId = workspace_id,
+                      name        = "cfn-bootstrap-temp",
+                      grafanaRole = "ADMIN",
+                  )
+                  # Response is flat: { "id": "123", "name": "...", ... }
+                  print(f"SA create response: {sa_resp}")
+                  sa_id = str(sa_resp["id"])
+
+                  tok_resp = client.create_workspace_service_account_token(
+                      workspaceId      = workspace_id,
+                      serviceAccountId = sa_id,
+                      name             = "cfn-bootstrap-temp-token",
+                      secondsToLive    = 6000,   # 5 min — just enough to run this Lambda
+                  )
+                  # Response is flat: { "key": "glsa_...", "id": "...", "name": "..." }
+                  print(f"Token create response keys: {list(tok_resp.keys())}")
+                  print(f"Token full response: {tok_resp}")
+                  bootstrap = tok_resp["serviceAccountToken"]["key"]
+                  print("Bootstrap token obtained via AWS SDK")
+                  # Clean up the temporary AWS-level service account
+                  try:
+                      client.delete_workspace_service_account(
+                          workspaceId      = workspace_id,
+                          serviceAccountId = sa_id,
+                      )
+                  except Exception as e:
+                      print(f"Warning: could not clean up temp SA: {e}")
+                  return bootstrap
+              except Exception as e:
+                  raise RuntimeError(f"Bootstrap failed: {e}")
+
+          # ── CFN handler ──────────────────────────────────────────
+          def handler(event, context):
+              print("RequestType:", event["RequestType"])
+              workspace_id = event["ResourceProperties"]["WorkspaceId"]
+              request_type = event["RequestType"]
+              physical_id  = event.get("PhysicalResourceId",
+                                       f"grafana-sa-token-{workspace_id}")
+
+              try:
+                  if request_type == "Create":
+                      # Step 1 — get a short-lived bootstrap token via AWS SDK
+                      boot_token = bootstrap_token(workspace_id)
+                      # Step 2 — create a permanent service account via Grafana HTTP API
+                      sa_id = create_service_account(boot_token)
+                      # Step 3 — create a long-lived token on that service account
+                      long_token = create_token(sa_id, boot_token)
+                      # Step 4 — persist token to SSM SecureString
+                      store_token(long_token, workspace_id)
+
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                          {"SsmPath": SSM_PATH, "ServiceAccountId": str(sa_id)},
+                          physical_id)
+
+                  elif request_type == "Update":
+                      # Rotate — boot, find+delete old SA, recreate fresh
+                      boot_token = bootstrap_token(workspace_id)
+                      old_sa_id  = find_service_account(boot_token)
+                      if old_sa_id:
+                          delete_service_account(old_sa_id, boot_token)
+                      sa_id      = create_service_account(boot_token)
+                      long_token = create_token(sa_id, boot_token)
+                      store_token(long_token, workspace_id)
+
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                          {"SsmPath": SSM_PATH, "ServiceAccountId": str(sa_id)},
+                          physical_id)
+
+                  elif request_type == "Delete":
+                      try:
+                          # Try to delete the service account using the stored token
+                          stored = get_stored_token()
+                          sa_id  = find_service_account(stored)
+                          if sa_id:
+                              delete_service_account(sa_id, stored)
+                      except Exception as e:
+                          print(f"Warning during SA cleanup: {e}")
+                      delete_ssm()
+
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                          {}, physical_id)
+
+              except Exception as exc:
+                  print(f"ERROR: {exc}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED,
+                      {"Message": str(exc)}, physical_id)
+
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+  
+  # Lambda — Custom resource: install Grafana plugins
+  GrafanaPluginInstallerFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: GrafanaWorkspace
+    Properties:
+      FunctionName: !Sub "${WorkspaceName}-plugin-installer"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt CustomResourceLambdaRole.Arn
+      Timeout: 300
+      Environment:
+        Variables:
+          WORKSPACE_ENDPOINT: !Sub "https://${GrafanaWorkspace.Endpoint}"
+          SSM_API_KEY_PATH:   !Sub "/grafana/${WorkspaceName}/admin-api-key"
+      Code:
+        ZipFile: |
+          import json
+          import urllib.request
+          import urllib.error
+          import os
+          import boto3
+          import cfnresponse
+
+          def get_api_key():
+              ssm = boto3.client("ssm")
+              resp = ssm.get_parameter(Name=os.environ["SSM_API_KEY_PATH"], WithDecryption=True)
+              return resp["Parameter"]["Value"]
+
+          def grafana_request(method, path, api_key, body=None):
+              url  = os.environ["WORKSPACE_ENDPOINT"].rstrip("/") + path
+              data = json.dumps(body).encode() if body else None
+              req  = urllib.request.Request(url, data=data, method=method, headers={
+                  "Authorization": f"Bearer {api_key}",
+                  "Content-Type":  "application/json",
+              })
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      return r.status, json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read())
+
+          def handler(event, context):
+              print("Event:", json.dumps(event))
+              request_type = event["RequestType"]
+              props        = event.get("ResourceProperties", {})
+              plugins      = props.get("PluginIds", "")
+              if isinstance(plugins, str):
+                  plugins = [p.strip() for p in plugins.split(",") if p.strip()]
+
+              try:
+                  api_key = get_api_key()
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED,
+                      {"Message": f"Could not retrieve API key: {e}"})
+                  return
+
+              errors = []
+              if request_type in ("Create", "Update"):
+                  for plugin_id in plugins:
+                      status, body = grafana_request("POST", f"/api/plugins/{plugin_id}/install", api_key)
+                      print(f"Install {plugin_id}: {status} {body}")
+                      if status not in (200, 201, 409):   # 409 = already installed
+                          errors.append({"plugin": plugin_id, "status": status})
+              elif request_type == "Delete":
+                  for plugin_id in plugins:
+                      status, body = grafana_request("POST", f"/api/plugins/{plugin_id}/uninstall", api_key)
+                      print(f"Uninstall {plugin_id}: {status} {body}")
+
+              if errors:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Errors": errors})
+              else:
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                      {"Message": f"Plugins processed: {plugins}"})
+
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # Lambda — Custom resource: create SNS notification channel
+  GrafanaNotificationChannelFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: GrafanaWorkspace
+    Properties:
+      FunctionName: !Sub "${WorkspaceName}-notification-channel"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt CustomResourceLambdaRole.Arn
+      Timeout: 120
+      Environment:
+        Variables:
+          WORKSPACE_ENDPOINT: !Sub "https://${GrafanaWorkspace.Endpoint}"
+          SSM_API_KEY_PATH:   !Sub "/grafana/${WorkspaceName}/admin-api-key"
+          SNS_TOPIC_ARN:      !Ref GrafanaAlertTopic
+      Code:
+        ZipFile: |
+          import json
+          import urllib.request
+          import urllib.error
+          import os
+          import boto3
+          import cfnresponse
+
+          def get_api_key():
+              ssm = boto3.client("ssm")
+              resp = ssm.get_parameter(Name=os.environ["SSM_API_KEY_PATH"], WithDecryption=True)
+              return resp["Parameter"]["Value"]
+
+          def grafana_request(method, path, api_key, body=None):
+              url  = os.environ["WORKSPACE_ENDPOINT"].rstrip("/") + path
+              data = json.dumps(body).encode() if body else None
+              req  = urllib.request.Request(url, data=data, method=method, headers={
+                  "Authorization": f"Bearer {api_key}",
+                  "Content-Type":  "application/json",
+              })
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      return r.status, json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read())
+
+          def handler(event, context):
+              print("Event:", json.dumps(event))
+              request_type  = event["RequestType"]
+              sns_topic_arn = os.environ["SNS_TOPIC_ARN"]
+              physical_id   = event.get("PhysicalResourceId", "grafana-notification-channel")
+
+              try:
+                  api_key = get_api_key()
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED,
+                      {"Message": f"Could not retrieve API key: {e}"})
+                  return
+
+              if request_type in ("Create", "Update"):
+                  channel = {
+                      "name":        "SNS Alerts",
+                      "type":        "sns",
+                      "isDefault":   True,
+                      "sendReminder": True,
+                      "settings": {
+                          "topic":        sns_topic_arn,
+                          "authProvider": "default",
+                      },
+                  }
+                  status, body = grafana_request("POST", "/api/alert-notifications", api_key, channel)
+                  print(f"Create notification channel: {status} {body}")
+                  if status in (200, 201):
+                      channel_id = str(body.get("id", ""))
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                          {"ChannelId": channel_id}, channel_id)
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.FAILED,
+                          {"Message": f"Failed: {status} {body}"}, physical_id)
+
+              elif request_type == "Delete":
+                  if physical_id and physical_id != "grafana-notification-channel":
+                      status, body = grafana_request(
+                          "DELETE", f"/api/alert-notifications/{physical_id}", api_key)
+                      print(f"Delete notification channel {physical_id}: {status} {body}")
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {}, physical_id)
+
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+
+
+  # Custom Resource — triggers the API key generator Lambda.
+  GrafanaApiKey:
+    Type: Custom::GrafanaServiceAccountToken
+    DependsOn: GrafanaWorkspace
+    Properties:
+      ServiceToken: !GetAtt GrafanaServiceAccountTokenFunction.Arn
+      WorkspaceId:  !Ref GrafanaWorkspace
+      # Bump TokenVersion to force token rotation on a future stack update
+      TokenVersion: "1"
+
+  # CloudWatch Alarm — alert if Lambda custom resource errors
+  PluginInstallerErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName:          !Sub "${WorkspaceName}-plugin-installer-errors"
+      AlarmDescription:   Grafana plugin installer Lambda encountered errors
+      Namespace:          AWS/Lambda
+      MetricName:         Errors
+      Dimensions:
+        - Name:  FunctionName
+          Value: !Ref GrafanaPluginInstallerFunction
+      Statistic:          Sum
+      Period:             300
+      EvaluationPeriods:  1
+      Threshold:          1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData:   notBreaching
+      AlarmActions:
+        - !Ref GrafanaAlertTopic
+      OKActions:
+        - !Ref GrafanaAlertTopic
+
 
   # Custom Resource — triggers the API key generator Lambda.
   GrafanaApiKey:
