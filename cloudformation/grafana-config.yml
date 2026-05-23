@@ -109,6 +109,8 @@ Resources:
           import urllib.error
           import boto3
           import cfnresponse
+          import time
+
 
           ENDPOINT = os.environ["WORKSPACE_ENDPOINT"].rstrip("/")
           SSM_PATH = os.environ["SSM_TOKEN_PATH"]
