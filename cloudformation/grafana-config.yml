@@ -262,7 +262,7 @@ Resources:
                       store_token(boot_token, workspace_id)
 
                       cfnresponse.send(event, context, cfnresponse.SUCCESS,
-                          {"SsmPath": SSM_PATH, "ServiceAccountId": str(sa_id)},
+                          {"SsmPath": SSM_PATH, "ServiceAccountId": ""},
                           physical_id)
 
                   elif request_type == "Update":
