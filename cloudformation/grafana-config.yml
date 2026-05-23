@@ -338,6 +338,7 @@ Resources:
           def get_api_key():
               ssm = boto3.client("ssm")
               resp = ssm.get_parameter(Name=os.environ["SSM_API_KEY_PATH"], WithDecryption=True)
+              print(f"Token retrieved: {os.environ['SSM_API_KEY_PATH']} (length={len(resp['Parameter']['Value'])})")
               return resp["Parameter"]["Value"]
 
           def grafana_request(method, path, api_key, body=None):
@@ -371,6 +372,7 @@ Resources:
               errors = []
               if request_type in ("Create", "Update"):
                   for plugin_id in plugins:
+                      print(f"Trying to install plugin: {plugin_id}")
                       status, body = grafana_request("POST", f"/api/plugins/{plugin_id}/install", api_key)
                       print(f"Install {plugin_id}: {status} {body}")
                       if status not in (200, 201, 409):   # 409 = already installed
