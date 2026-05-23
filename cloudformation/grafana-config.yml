@@ -334,11 +334,16 @@ Resources:
           import os
           import boto3
           import cfnresponse
+          import logging
+
+          # Set up the logger
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
 
           def get_api_key():
               ssm = boto3.client("ssm")
               resp = ssm.get_parameter(Name=os.environ["SSM_API_KEY_PATH"], WithDecryption=True)
-              print(f"Token retrieved: {os.environ['SSM_API_KEY_PATH']} (length={len(resp['Parameter']['Value'])})")
+              logger.info(f"Token retrieved: {os.environ['SSM_API_KEY_PATH']} (length={len(resp['Parameter']['Value'])})")
               return resp["Parameter"]["Value"]
 
           def grafana_request(method, path, api_key, body=None):
@@ -355,7 +360,7 @@ Resources:
                   return e.code, json.loads(e.read())
 
           def handler(event, context):
-              print("Event:", json.dumps(event))
+              logger.info("Event: %s", json.dumps(event))
               request_type = event["RequestType"]
               props        = event.get("ResourceProperties", {})
               plugins      = props.get("PluginIds", "")
@@ -365,6 +370,7 @@ Resources:
               try:
                   api_key = get_api_key()
               except Exception as e:
+                  logger.error("Could not retrieve API key: %s", e)
                   cfnresponse.send(event, context, cfnresponse.FAILED,
                       {"Message": f"Could not retrieve API key: {e}"})
                   return
@@ -372,15 +378,15 @@ Resources:
               errors = []
               if request_type in ("Create", "Update"):
                   for plugin_id in plugins:
-                      print(f"Trying to install plugin: {plugin_id}")
+                      logger.info(f"Trying to install plugin: {plugin_id}")
                       status, body = grafana_request("POST", f"/api/plugins/{plugin_id}/install", api_key)
-                      print(f"Install {plugin_id}: {status} {body}")
+                      logger.info(f"Install {plugin_id}: {status} {body}")
                       if status not in (200, 201, 409):   # 409 = already installed
                           errors.append({"plugin": plugin_id, "status": status})
               elif request_type == "Delete":
                   for plugin_id in plugins:
                       status, body = grafana_request("POST", f"/api/plugins/{plugin_id}/uninstall", api_key)
-                      print(f"Uninstall {plugin_id}: {status} {body}")
+                      logger.info(f"Uninstall {plugin_id}: {status} {body}")
 
               if errors:
                   cfnresponse.send(event, context, cfnresponse.FAILED, {"Errors": errors})
