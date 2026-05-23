@@ -225,7 +225,7 @@ Resources:
                       workspaceId      = workspace_id,
                       serviceAccountId = sa_id,
                       name             = "cfn-bootstrap-temp-token",
-                      secondsToLive    = 6000,   # 5 min — just enough to run this Lambda
+                      secondsToLive    = 900000,
                   )
                   # Response is flat: { "key": "glsa_...", "id": "...", "name": "..." }
                   print(f"Token create response keys: {list(tok_resp.keys())}")
