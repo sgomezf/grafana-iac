@@ -305,7 +305,7 @@ Resources:
   # Lambda — Custom resource: install Grafana plugins
     GrafanaPluginInstallerFunction:
     Type: AWS::Lambda::Function
-    DependsOn: GrafanaWorkspace
+    DependsOn: GrafanaApiKey
     Properties:
       FunctionName: !Sub "${WorkspaceName}-plugin-installer"
       Runtime: python3.12
@@ -314,8 +314,8 @@ Resources:
       Timeout: 300
       Environment:
         Variables:
-          WORKSPACE_ENDPOINT: !Sub "https://${GrafanaWorkspace.Endpoint}"
-          SSM_API_KEY_PATH:   !Sub "/grafana/${WorkspaceName}/admin-api-key"
+          WORKSPACE_ENDPOINT:  !Ref WorkspaceEndpoint
+          SSM_TOKEN_PATH:      !Sub "/grafana/${WorkspaceName}/admin-api-key"
       Code:
         ZipFile: |
           import json
