@@ -256,14 +256,14 @@ Resources:
 
               try:
                   if request_type == "Create":
-                      # Step 1 — get a short-lived bootstrap token via AWS SDK
+                      # get a short-lived bootstrap token via AWS SDK
                       boot_token = bootstrap_token(workspace_id)
-                      # Step 2 — create a permanent service account via Grafana HTTP API
-                      sa_id = create_service_account(boot_token)
-                      # Step 3 — create a long-lived token on that service account
-                      long_token = create_token(sa_id, boot_token)
+                      # create a permanent service account via Grafana HTTP API
+                      # sa_id = create_service_account(boot_token)
+                      # create a long-lived token on that service account
+                      # long_token = create_token(sa_id, boot_token)
                       # Step 4 — persist token to SSM SecureString
-                      store_token(long_token, workspace_id)
+                      store_token(boot_token, workspace_id)
 
                       cfnresponse.send(event, context, cfnresponse.SUCCESS,
                           {"SsmPath": SSM_PATH, "ServiceAccountId": str(sa_id)},
