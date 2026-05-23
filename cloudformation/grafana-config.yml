@@ -233,13 +233,13 @@ Resources:
                   bootstrap = tok_resp["serviceAccountToken"]["key"]
                   print("Bootstrap token obtained via AWS SDK")
                   # Clean up the temporary AWS-level service account
-                  #try:
-                  #    client.delete_workspace_service_account(
-                  #        workspaceId      = workspace_id,
-                  #        serviceAccountId = sa_id,
-                  #    )
-                  #except Exception as e:
-                  #    print(f"Warning: could not clean up temp SA: {e}")
+                  try:
+                      client.delete_workspace_service_account(
+                          workspaceId      = workspace_id,
+                          serviceAccountId = sa_id,
+                      )
+                  except Exception as e:
+                      print(f"Warning: could not clean up temp SA: {e}")
                   return bootstrap
               except Exception as e:
                   raise RuntimeError(f"Bootstrap failed: {e}")
