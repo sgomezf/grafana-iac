@@ -505,7 +505,7 @@ Resources:
     Type: Custom::GrafanaPlugins
     DependsOn: GrafanaApiKey
     Properties:
-      ServiceToken: !Ref GrafanaPluginInstallerFunctionArn
+      ServiceToken: !Sub "${GrafanaPluginInstallerFunction.Arn}"
       WorkspaceId:  !Ref WorkspaceId
       PluginIds:    !Join [",", !Ref PluginIds]
 
