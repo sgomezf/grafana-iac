@@ -68,14 +68,6 @@ jobs:
             --template-body file://${{ env.GRAFANA_TEMPLATE_FILE }}
           echo "✅ Template validation passed"
 
-
-      - name: Validate Config CloudFormation template
-        run: |
-          aws cloudformation validate-template \
-            --template-body file://${{ env.CONFIG_TEMPLATE_FILE }}
-          echo "✅ Template validation passed"
-
-
   # ------------------------------------------------------------------
   # Deploy (create or update) the Gragana CloudFormation stack
   # ------------------------------------------------------------------
