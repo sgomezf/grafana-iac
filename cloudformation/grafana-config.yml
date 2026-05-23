@@ -100,7 +100,7 @@ Resources:
           SSM_TOKEN_PATH:      !Sub "/grafana/${WorkspaceName}/admin-api-key"
           SERVICE_ACCOUNT_NAME: "cfn-bootstrap-sa"
           # Token TTL in seconds — 0 means no expiry (recommended for automation)
-          TOKEN_TTL_SECONDS:   "0"
+          TOKEN_TTL_SECONDS:   "36000"
       Code:
         ZipFile: |
           import json
