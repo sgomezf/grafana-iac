@@ -100,7 +100,7 @@ Resources:
           SSM_TOKEN_PATH:      !Sub "/grafana/${WorkspaceName}/admin-api-key"
           SERVICE_ACCOUNT_NAME: "cfn-bootstrap-sa"
           # Token TTL in seconds — 0 means no expiry (recommended for automation)
-          TOKEN_TTL_SECONDS:   "0"
+          TOKEN_TTL_SECONDS:   "90000"
       Code:
         ZipFile: |
           import json
@@ -185,7 +185,8 @@ Resources:
               """Create a token on an existing service account and return the token string."""
               print(f"Creating token for service account id={sa_id}")
               payload = {"name": "cfn-token"}
-              payload["secondsToLive"] = TOKEN_TTL
+              if TOKEN_TTL > 0:
+                  payload["secondsToLive"] = TOKEN_TTL
               status, body = grafana(
                   "POST", f"/api/serviceaccounts/{sa_id}/tokens", token, payload)
               if status not in (200, 201):
