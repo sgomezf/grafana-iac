@@ -662,9 +662,3 @@ Outputs:
     Export:
       Name: !Sub "${AWS::StackName}-GrafanaPluginInstallerFunctionArn"
 
-  GrafanaApiKeyGeneratorFunctionArn:
-    Description: ARN of the Lambda function for generating Grafana API keys
-    Value: !GetAtt GrafanaApiKeyGeneratorFunction.Arn
-    Export:
-      Name: !Sub "${AWS::StackName}-GrafanaApiKeyGeneratorFunctionArn"
-
