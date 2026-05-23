@@ -468,7 +468,7 @@ Resources:
     Type: Custom::GrafanaServiceAccountToken
     Properties:
       ServiceToken: !GetAtt GrafanaServiceAccountTokenFunction.Arn
-      WorkspaceId:  !Ref GrafanaWorkspace
+      WorkspaceId:  !Ref WorkspaceName
       # Bump TokenVersion to force token rotation on a future stack update
       TokenVersion: "1"
 
