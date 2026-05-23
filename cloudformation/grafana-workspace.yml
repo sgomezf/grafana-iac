@@ -325,12 +325,12 @@ Resources:
                       grafanaRole = "ADMIN",
                   )
                   print(f"Service account created for bootstrap: {sa_resp}")
-                  sa_id = sa_resp["serviceAccount"]["serviceAccountId"]
+                  sa_id = sa_resp["id"]
                   tok_resp = client.create_workspace_service_account_token(
                       workspaceId      = workspace_id,
                       serviceAccountId = sa_id,
                       name             = "cfn-bootstrap-temp-token",
-                      secondsToLive    = 300,   # 5 min — just enough to run this Lambda
+                      secondsToLive    = 600,   # 10 min — just enough to run this Lambda
                   )
                   bootstrap = tok_resp["serviceAccountToken"]["key"]
                   print("Bootstrap token obtained via AWS SDK")
