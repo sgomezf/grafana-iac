@@ -325,7 +325,7 @@ Resources:
       Timeout: 300
       Environment:
         Variables:
-          WORKSPACE_ID: !Ref GrafanaWorkspace
+          WORKSPACE_ID: !Ref WorkspaceId
       Code:
         ZipFile: |
           import json
