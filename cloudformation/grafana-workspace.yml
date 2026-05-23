@@ -178,11 +178,6 @@ Resources:
                   - ssm:AddTagsToResource
                 Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/grafana/${WorkspaceName}/*"
               # --- KMS: needed to write SSM SecureString ---
-              - Sid: S3DashboardsAccess
-                Effect: Allow
-                Action:
-                  - s3:GetObject
-                  - s3:ListBucket
               - Sid: KMSForSSMSecureString
                 Effect: Allow
                 Action:
