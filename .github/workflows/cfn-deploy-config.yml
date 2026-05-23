@@ -5,8 +5,8 @@ on:
     branches:
       - main
     paths:
-      - "cloudformation/grafana-workspace.yml"
-      - ".github/workflows/cfn-deploy-grafana.yml"
+      - "cloudformation/grafana-config.yml"
+      - ".github/workflows/cfn-deploy-config.yml"
   workflow_dispatch:
     inputs:
       environment:
@@ -16,7 +16,6 @@ on:
         type: choice
         options:
           - development
-          #- staging
           - production
       action:
         description: "Stack action"
@@ -29,13 +28,11 @@ on:
 
 # Prevent concurrent deployments to the same environment
 concurrency:
-  group: grafana-deploy-${{ github.event.inputs.environment || 'development' }}
+  group: grafana-config-${{ github.event.inputs.environment || 'development' }}
   cancel-in-progress: false
 
 env:
   AWS_REGION: us-east-2
-  GRAFANA_STACK_NAME: grafana-${{ github.event.inputs.environment || 'development' }}
-  GRAFANA_TEMPLATE_FILE: cloudformation/grafana-workspace.yml
   CONFIG_STACK_NAME: grafana-${{ github.event.inputs.environment || 'development' }}
   CONFIG_TEMPLATE_FILE: cloudformation/grafana-config.yml
 
@@ -64,7 +61,7 @@ jobs:
       - name: Validate Grafana CloudFormation template
         run: |
           aws cloudformation validate-template \
-            --template-body file://${{ env.GRAFANA_TEMPLATE_FILE }}
+            --template-body file://${{ env.CONFIG_TEMPLATE_FILE }}
           echo "✅ Template validation passed"
 
   # ------------------------------------------------------------------
@@ -75,16 +72,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     if: github.event.inputs.action != 'delete'
-    outputs:
-      grafana_url: ${{ steps.deploy-grafana.outputs.WorkspaceEndpoint }}
-      workspace_id: ${{ steps.deploy-grafana.outputs.WorkspaceId }}
-      workspace_name: ${{ steps.deploy-grafana.outputs.WorkspaceName }}
-      workspace_endpoint: ${{ steps.deploy-grafana.outputs.WorkspaceEndpoint }}
-      alert_topic_arn: ${{ steps.deploy-grafana.outputs.AlertTopicArn }}
-      grafana_role_arn: ${{ steps.deploy-grafana.outputs.GrafanaRoleArn }}
-      api_key_ssm_path: ${{ steps.deploy-grafana.outputs.ApiKeySSMPath }}
-      grafana_plugin_installer_function_arn: ${{ steps.deploy-grafana.outputs.GrafanaPluginInstallerFunctionArn }}
-      grafana_api_key_generator_function_arn: ${{ steps.deploy-grafana.outputs.GrafanaApiKeyGeneratorFunctionArn }}
 
     environment: ${{ github.event.inputs.environment || 'development' }}
     permissions:
@@ -101,23 +88,22 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy GrafanaCloudFormation stack
-        id: deploy-grafana
+      - name: Deploy Grafana Configuration stack
+        id: configure-grafana
         run: |
           ENV="${{ github.event.inputs.environment || 'development' }}"
 
-          echo "🚀 Deploying stack: ${{ env.GRAFANA_STACK_NAME }}"
+          echo "🚀 Deploying stack: ${{ env.CONFIG_STACK_NAME }}"
 
           aws cloudformation deploy \
-            --template-file ${{ env.GRAFANA_TEMPLATE_FILE }} \
-            --stack-name ${{ env.GRAFANA_STACK_NAME }} \
+            --template-file ${{ env.CONFIG_TEMPLATE_FILE }} \
+            --stack-name ${{ env.CONFIG_STACK_NAME }} \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
               WorkspaceName="grafana-${ENV}" \
-              WorkspaceDescription="Grafana workspace for ${ENV} environment" \
-              GrafanaVersion="12.4" \
-              OrganizationRoleName="ADMIN" \
+              WorkspaceEndpoint="https://g-460127ac3d.grafana-workspace.us-east-2.amazonaws.com/" \
+              PluginIds="grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel,camptocamp-prometheus-alertmanager-datasource" \
             --tags \
               Environment="${ENV}" \
               ManagedBy="GitHubActions" \
@@ -126,20 +112,5 @@ jobs:
 
           echo "✅ Stack deployment complete"
 
-      - name: Fetch stack outputs
-        run: |
-          echo "📋 Stack Outputs:"
-          aws cloudformation describe-stacks \
-            --stack-name ${{ env.GRAFANA_STACK_NAME }} \
-            --query "Stacks[0].Outputs[*].{Key:OutputKey,Value:OutputValue}" \
-            --output table
 
-      - name: Print Grafana URL
-        run: |
-          ENDPOINT=$(aws cloudformation describe-stacks \
-            --stack-name ${{ env.GRAFANA_STACK_NAME }} \
-            --query "Stacks[0].Outputs[?OutputKey=='WorkspaceEndpoint'].OutputValue" \
-            --output text)
-          echo "🌐 Grafana Workspace URL: ${ENDPOINT}"
-          echo "GRAFANA_URL=${ENDPOINT}" >> $GITHUB_ENV
 
