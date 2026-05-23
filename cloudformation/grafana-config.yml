@@ -303,81 +303,84 @@ Resources:
           Value: CloudFormation
   
   # Lambda — Custom resource: install Grafana plugins
-  # GrafanaPluginInstallerFunction:
-  #   Type: AWS::Lambda::Function
-  #   Properties:
-  #     FunctionName: !Sub "${WorkspaceName}-plugin-installer"
-  #     Runtime: python3.12
-  #     Handler: index.handler
-  #     Role: !GetAtt CustomResourceLambdaRole.Arn
-  #     Timeout: 300
-  #     Environment:
-  #       Variables:
-  #         WORKSPACE_ENDPOINT: !Sub "https://${GrafanaWorkspace.Endpoint}"
-  #         SSM_API_KEY_PATH:   !Sub "/grafana/${WorkspaceName}/admin-api-key"
-  #     Code:
-  #       ZipFile: |
-  #         import json
-  #         import urllib.request
-  #         import urllib.error
-  #         import os
-  #         import boto3
-  #         import cfnresponse
+    GrafanaPluginInstallerFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: GrafanaWorkspace
+    Properties:
+      FunctionName: !Sub "${WorkspaceName}-plugin-installer"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt CustomResourceLambdaRole.Arn
+      Timeout: 300
+      Environment:
+        Variables:
+          WORKSPACE_ENDPOINT: !Sub "https://${GrafanaWorkspace.Endpoint}"
+          SSM_API_KEY_PATH:   !Sub "/grafana/${WorkspaceName}/admin-api-key"
+      Code:
+        ZipFile: |
+          import json
+          import urllib.request
+          import urllib.error
+          import os
+          import boto3
+          import cfnresponse
 
-  #         def get_api_key():
-  #             ssm = boto3.client("ssm")
-  #             resp = ssm.get_parameter(Name=os.environ["SSM_API_KEY_PATH"], WithDecryption=True)
-  #             return resp["Parameter"]["Value"]
+          def get_api_key():
+              ssm = boto3.client("ssm")
+              resp = ssm.get_parameter(Name=os.environ["SSM_API_KEY_PATH"], WithDecryption=True)
+              return resp["Parameter"]["Value"]
 
-  #         def grafana_request(method, path, api_key, body=None):
-  #             url  = os.environ["WORKSPACE_ENDPOINT"].rstrip("/") + path
-  #             data = json.dumps(body).encode() if body else None
-  #             req  = urllib.request.Request(url, data=data, method=method, headers={
-  #                 "Authorization": f"Bearer {api_key}",
-  #                 "Content-Type":  "application/json",
-  #             })
-  #             try:
-  #                 with urllib.request.urlopen(req, timeout=30) as r:
-  #                     return r.status, json.loads(r.read())
-  #             except urllib.error.HTTPError as e:
-  #                 return e.code, json.loads(e.read())
+          def grafana_request(method, path, api_key, body=None):
+              url  = os.environ["WORKSPACE_ENDPOINT"].rstrip("/") + path
+              data = json.dumps(body).encode() if body else None
+              req  = urllib.request.Request(url, data=data, method=method, headers={
+                  "Authorization": f"Bearer {api_key}",
+                  "Content-Type":  "application/json",
+              })
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      return r.status, json.loads(r.read())
+              except urllib.error.HTTPError as e:
+                  return e.code, json.loads(e.read())
 
-  #         def handler(event, context):
-  #             print("Event:", json.dumps(event))
-  #             request_type = event["RequestType"]
-  #             props        = event.get("ResourceProperties", {})
-  #             plugins      = props.get("PluginIds", "")
-  #             if isinstance(plugins, str):
-  #                 plugins = [p.strip() for p in plugins.split(",") if p.strip()]
+          def handler(event, context):
+              print("Event:", json.dumps(event))
+              request_type = event["RequestType"]
+              props        = event.get("ResourceProperties", {})
+              plugins      = props.get("PluginIds", "")
+              if isinstance(plugins, str):
+                  plugins = [p.strip() for p in plugins.split(",") if p.strip()]
 
-  #             try:
-  #                 api_key = get_api_key()
-  #             except Exception as e:
-  #                 cfnresponse.send(event, context, cfnresponse.FAILED,
-  #                     {"Message": f"Could not retrieve API key: {e}"})
-  #                 return
+              try:
+                  api_key = get_api_key()
+              except Exception as e:
+                  cfnresponse.send(event, context, cfnresponse.FAILED,
+                      {"Message": f"Could not retrieve API key: {e}"})
+                  return
 
-  #             errors = []
-  #             if request_type in ("Create", "Update"):
-  #                 for plugin_id in plugins:
-  #                     status, body = grafana_request("POST", f"/api/plugins/{plugin_id}/install", api_key)
-  #                     print(f"Install {plugin_id}: {status} {body}")
-  #                     if status not in (200, 201, 409):   # 409 = already installed
-  #                         errors.append({"plugin": plugin_id, "status": status})
-  #             elif request_type == "Delete":
-  #                 for plugin_id in plugins:
-  #                     status, body = grafana_request("POST", f"/api/plugins/{plugin_id}/uninstall", api_key)
-  #                     print(f"Uninstall {plugin_id}: {status} {body}")
+              errors = []
+              if request_type in ("Create", "Update"):
+                  for plugin_id in plugins:
+                      status, body = grafana_request("POST", f"/api/plugins/{plugin_id}/install", api_key)
+                      print(f"Install {plugin_id}: {status} {body}")
+                      if status not in (200, 201, 409):   # 409 = already installed
+                          errors.append({"plugin": plugin_id, "status": status})
+              elif request_type == "Delete":
+                  for plugin_id in plugins:
+                      status, body = grafana_request("POST", f"/api/plugins/{plugin_id}/uninstall", api_key)
+                      print(f"Uninstall {plugin_id}: {status} {body}")
 
-  #             if errors:
-  #                 cfnresponse.send(event, context, cfnresponse.FAILED, {"Errors": errors})
-  #             else:
-  #                 cfnresponse.send(event, context, cfnresponse.SUCCESS,
-  #                     {"Message": f"Plugins processed: {plugins}"})
+              if errors:
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Errors": errors})
+              else:
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                      {"Message": f"Plugins processed: {plugins}"})
 
-  #     Tags:
-  #       - Key: ManagedBy
-  #         Value: CloudFormation
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+
+
 
   # Lambda — Custom resource: create SNS notification channel
   # GrafanaNotificationChannelFunction:
@@ -498,13 +501,13 @@ Resources:
   #       - !Ref GrafanaAlertTopic
 
   # Custom Plugin — trigger plugin installer
-  # GrafanaPlugins:
-  #   Type: Custom::GrafanaPlugins
-  #   DependsOn: GrafanaApiKey
-  #   Properties:
-  #     ServiceToken: !Ref GrafanaPluginInstallerFunctionArn
-  #     WorkspaceId:  !Ref WorkspaceId
-  #     PluginIds:    !Join [",", !Ref PluginIds]
+  GrafanaPlugins:
+    Type: Custom::GrafanaPlugins
+    DependsOn: GrafanaApiKey
+    Properties:
+      ServiceToken: !Ref GrafanaPluginInstallerFunctionArn
+      WorkspaceId:  !Ref WorkspaceId
+      PluginIds:    !Join [",", !Ref PluginIds]
 
   # Custom Resource — trigger notification channel creation
   # GrafanaNotificationChannel:
