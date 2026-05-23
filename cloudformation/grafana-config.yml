@@ -56,6 +56,8 @@ Resources:
                 Effect: Allow
                 Action:
                   - grafana:DescribeWorkspace
+                  - grafana:DescribeWorkspaceConfiguration
+                  - grafana:UpdateWorkspaceConfiguration
                   - grafana:ListWorkspaces
                   - grafana:CreateWorkspaceServiceAccount
                   - grafana:DeleteWorkspaceServiceAccount
@@ -315,7 +317,7 @@ Resources:
   # Lambda — Custom resource: install Grafana plugins
   GrafanaPluginInstallerFunction:
     Type: AWS::Lambda::Function
-    #DependsOn: GrafanaApiKey
+    DependsOn: GrafanaWorkspace
     Properties:
       FunctionName: !Sub "${WorkspaceName}-plugin-installer"
       Runtime: python3.12
@@ -324,79 +326,136 @@ Resources:
       Timeout: 300
       Environment:
         Variables:
-          WORKSPACE_ENDPOINT:  !Ref WorkspaceEndpoint
-          SSM_API_KEY_PATH:   !Sub "/grafana/${WorkspaceName}/admin-api-key"
+          WORKSPACE_ID: !Ref GrafanaWorkspace
       Code:
         ZipFile: |
           import json
-          import urllib.request
-          import urllib.error
           import os
+          import time
           import boto3
           import cfnresponse
-          import logging
 
-          # Set up the logger
-          logger = logging.getLogger()
-          logger.setLevel(logging.INFO)
+          client = boto3.client("grafana")
+          WORKSPACE_ID = os.environ["WORKSPACE_ID"]
 
-          def get_api_key():
-              ssm = boto3.client("ssm")
-              resp = ssm.get_parameter(Name=os.environ["SSM_API_KEY_PATH"], WithDecryption=True)
-              logger.info(f"Token retrieved: {os.environ['SSM_API_KEY_PATH']} (length={len(resp['Parameter']['Value'])})")
-              return resp["Parameter"]["Value"]
+          def get_current_config():
+              """Fetch the current workspace configuration as a dict."""
+              resp = client.describe_workspace_configuration(workspaceId=WORKSPACE_ID)
+              raw  = resp.get("configuration", "{}")
+              return json.loads(raw)
 
-          def grafana_request(method, path, api_key, body=None):
-              url  = os.environ["WORKSPACE_ENDPOINT"].rstrip("/") + path
-              data = json.dumps(body).encode() if body else None
-              req  = urllib.request.Request(url, data=data, method=method, headers={
-                  "Authorization": f"Bearer {api_key}",
-                  "Content-Type":  "application/json",
-              })
-              try:
-                  with urllib.request.urlopen(req, timeout=30) as r:
-                      return r.status, json.loads(r.read())
-              except urllib.error.HTTPError as e:
-                  return e.code, json.loads(e.read())
+          def wait_for_active(max_wait=120):
+              """Poll until workspace status is ACTIVE (config updates cause brief UPDATING state)."""
+              print("Waiting for workspace to become ACTIVE...")
+              deadline = time.time() + max_wait
+              while time.time() < deadline:
+                  resp   = client.describe_workspace(workspaceId=WORKSPACE_ID)
+                  status = resp["workspace"]["status"]
+                  print(f"  Workspace status: {status}")
+                  if status == "ACTIVE":
+                      return
+                  if status == "FAILED":
+                      raise RuntimeError("Workspace entered FAILED state during plugin update")
+                  time.sleep(10)
+              raise RuntimeError(f"Workspace did not become ACTIVE within {max_wait}s")
 
-          def handler(event, context):
-              logger.info("Event: %s", json.dumps(event))
-              request_type = event["RequestType"]
-              props        = event.get("ResourceProperties", {})
-              plugins      = props.get("PluginIds", "")
-              if isinstance(plugins, str):
-                  plugins = [p.strip() for p in plugins.split(",") if p.strip()]
+          def enable_plugins(plugin_ids):
+              """
+              Add plugins to the workspace configuration via the AWS API.
+              Merges with any plugins already configured so existing ones
+              are not removed.
+              """
+              config = get_current_config()
 
-              try:
-                  api_key = get_api_key()
-              except Exception as e:
-                  logger.error("Could not retrieve API key: %s", e)
-                  cfnresponse.send(event, context, cfnresponse.FAILED,
-                      {"Message": f"Could not retrieve API key: {e}"})
+              # Current plugin list (may be absent on a fresh workspace)
+              current = config.get("plugins", {}).get("pluginList", [])
+              current_ids = {p["pluginId"] for p in current}
+
+              # Build merged list — add new ones, keep existing ones
+              to_add = [pid for pid in plugin_ids if pid not in current_ids]
+              if not to_add:
+                  print("All requested plugins already enabled — nothing to do")
+                  return current_ids
+
+              merged = current + [{"pluginId": pid} for pid in to_add]
+              config.setdefault("plugins", {})["pluginList"] = merged
+
+              print(f"Enabling plugins: {to_add}")
+              client.update_workspace_configuration(
+                  workspaceId   = WORKSPACE_ID,
+                  configuration = json.dumps(config),
+              )
+              wait_for_active()
+              print(f"Plugins enabled: {to_add}")
+              return {p["pluginId"] for p in merged}
+
+          def disable_plugins(plugin_ids):
+              """
+              Remove specific plugins from the workspace configuration.
+              Leaves any other configured plugins untouched.
+              """
+              config  = get_current_config()
+              current = config.get("plugins", {}).get("pluginList", [])
+              to_keep = [p for p in current if p["pluginId"] not in plugin_ids]
+
+              if len(to_keep) == len(current):
+                  print("None of the requested plugins were enabled — nothing to remove")
                   return
 
-              errors = []
-              if request_type in ("Create", "Update"):
-                  for plugin_id in plugins:
-                      logger.info(f"Trying to install plugin: {plugin_id}")
-                      status, body = grafana_request("POST", f"/api/plugins/{plugin_id}/install", api_key)
-                      logger.info(f"Install {plugin_id}: {status} {body}")
-                      if status not in (200, 201, 409):   # 409 = already installed
-                          errors.append({"plugin": plugin_id, "status": status})
-              elif request_type == "Delete":
-                  for plugin_id in plugins:
-                      status, body = grafana_request("POST", f"/api/plugins/{plugin_id}/uninstall", api_key)
-                      logger.info(f"Uninstall {plugin_id}: {status} {body}")
+              config["plugins"]["pluginList"] = to_keep
+              print(f"Disabling plugins: {plugin_ids}")
+              client.update_workspace_configuration(
+                  workspaceId   = WORKSPACE_ID,
+                  configuration = json.dumps(config),
+              )
+              wait_for_active()
+              print("Plugins disabled")
 
-              if errors:
-                  cfnresponse.send(event, context, cfnresponse.FAILED, {"Errors": errors})
-              else:
-                  cfnresponse.send(event, context, cfnresponse.SUCCESS,
-                      {"Message": f"Plugins processed: {plugins}"})
+          def handler(event, context):
+              print("RequestType:", event["RequestType"])
+              props       = event.get("ResourceProperties", {})
+              plugin_ids  = props.get("PluginIds", "")
+              physical_id = event.get("PhysicalResourceId", f"grafana-plugins-{WORKSPACE_ID}")
+
+              # Accept either a comma-delimited string or a list (CFN sends lists
+              # from CommaDelimitedList parameters as actual Python lists here)
+              if isinstance(plugin_ids, str):
+                  plugin_ids = [p.strip() for p in plugin_ids.split(",") if p.strip()]
+
+              print(f"Plugin IDs: {plugin_ids}")
+
+              try:
+                  request_type = event["RequestType"]
+
+                  if request_type in ("Create", "Update"):
+                      if not plugin_ids:
+                          print("No plugin IDs provided — skipping")
+                          cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                              {"Message": "No plugins specified"}, physical_id)
+                          return
+                      enabled = enable_plugins(plugin_ids)
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                          {"EnabledPlugins": list(enabled)}, physical_id)
+
+                  elif request_type == "Delete":
+                      # Best-effort removal on stack deletion
+                      if plugin_ids:
+                          try:
+                              disable_plugins(plugin_ids)
+                          except Exception as e:
+                              print(f"Warning during plugin disable: {e}")
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                          {"Message": "Plugins disabled (best-effort)"}, physical_id)
+
+              except Exception as exc:
+                  print(f"ERROR: {exc}")
+                  cfnresponse.send(event, context, cfnresponse.FAILED,
+                      {"Message": str(exc)}, physical_id)
 
       Tags:
         - Key: ManagedBy
           Value: CloudFormation
+
 
   GrafanaPlugins:
     Type: Custom::GrafanaPlugins
