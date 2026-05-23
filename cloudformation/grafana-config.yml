@@ -3,6 +3,11 @@ Description: >
   Custom CloudFormation template to install Grafana plugins and configure an SNS notification channel in an Amazon Managed Grafana workspace. This template includes custom resources backed by Lambda functions to manage the Grafana API key lifecycle, plugin installation, and notification channel setup.
 
 Parameters:
+  WorkspaceId:
+    Type: String
+    Default: MyGrafanaWorkspace
+    Description: ID for the Grafana workspace
+
   WorkspaceName:
     Type: String
     Default: MyGrafanaWorkspace
@@ -468,7 +473,7 @@ Resources:
     Type: Custom::GrafanaServiceAccountToken
     Properties:
       ServiceToken: !GetAtt GrafanaServiceAccountTokenFunction.Arn
-      WorkspaceId:  !Ref WorkspaceName
+      WorkspaceId:  !Ref WorkspaceId
       # Bump TokenVersion to force token rotation on a future stack update
       TokenVersion: "1"
 
@@ -500,7 +505,7 @@ Resources:
   #   DependsOn: GrafanaApiKey
   #   Properties:
   #     ServiceToken: !Ref GrafanaPluginInstallerFunctionArn
-  #     WorkspaceId:  !Ref WorkspaceName
+  #     WorkspaceId:  !Ref WorkspaceId
   #     PluginIds:    !Join [",", !Ref PluginIds]
 
   # Custom Resource — trigger notification channel creation
