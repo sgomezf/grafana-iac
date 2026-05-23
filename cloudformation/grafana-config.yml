@@ -501,12 +501,12 @@ Resources:
   #       - !Ref GrafanaAlertTopic
 
   # Custom Plugin — trigger plugin installer
-  GrafanaPlugins:
-    Type: Custom::GrafanaPlugins
-    DependsOn: GrafanaApiKey
-    Properties:
-      WorkspaceId:  !Ref WorkspaceId
-      PluginIds:    !Join [",", !Ref PluginIds]
+  # GrafanaPlugins:
+  #   Type: Custom::GrafanaPlugins
+  #   DependsOn: GrafanaApiKey
+  #   Properties:
+  #     WorkspaceId:  !Ref WorkspaceId
+  #     PluginIds:    !Join [",", !Ref PluginIds]
 
   # Custom Resource — trigger notification channel creation
   # GrafanaNotificationChannel:
