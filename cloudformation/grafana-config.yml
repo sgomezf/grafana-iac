@@ -505,8 +505,7 @@ Resources:
     Type: Custom::GrafanaPlugins
     DependsOn: GrafanaApiKey
     Properties:
-      ServiceToken: !Sub "${GrafanaPluginInstallerFunction.Arn}"
-      WorkspaceId:  !Ref WorkspaceId
+      WorkspaceId:  !Ref GrafanaWorkspace
       PluginIds:    !Join [",", !Ref PluginIds]
 
   # Custom Resource — trigger notification channel creation
