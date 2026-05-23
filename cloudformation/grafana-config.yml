@@ -327,7 +327,7 @@ Resources:
 
           def get_api_key():
               ssm = boto3.client("ssm")
-              resp = ssm.get_parameter(Name=os.environ["SSM_API_KEY_PATH"], WithDecryption=True)
+              resp = ssm.get_parameter(Name=os.environ["SSM_TOKEN_PATH"], WithDecryption=True)
               return resp["Parameter"]["Value"]
 
           def grafana_request(method, path, api_key, body=None):
