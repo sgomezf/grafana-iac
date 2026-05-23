@@ -336,7 +336,8 @@ Resources:
                   )
                   # Response is flat: { "key": "glsa_...", "id": "...", "name": "..." }
                   print(f"Token create response keys: {list(tok_resp.keys())}")
-                  bootstrap = tok_resp["serviceAccountTokenId"]
+                  print(f"Token full response: {tok_resp}")
+                  bootstrap = tok_resp["serviceAccountTokenId"]["key"]
                   print("Bootstrap token obtained via AWS SDK")
                   # Clean up the temporary AWS-level service account
                   try:
