@@ -315,7 +315,7 @@ Resources:
   # Lambda — Custom resource: install Grafana plugins
   GrafanaPluginInstallerFunction:
     Type: AWS::Lambda::Function
-    DependsOn: GrafanaApiKey
+    #DependsOn: GrafanaApiKey
     Properties:
       FunctionName: !Sub "${WorkspaceName}-plugin-installer"
       Runtime: python3.12
