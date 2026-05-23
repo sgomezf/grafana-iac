@@ -154,8 +154,4 @@ Outputs:
     Export:
       Name: !Sub "${WorkspaceName}"
 
-  WorkspaceEndpoint:
-    Description: The endpoint URL of the Grafana workspace
-    Value: !Sub "https://${GrafanaWorkspace.Endpoint}"
-    Export:
-      Name: !Sub "${AWS::StackName}-WorkspaceEndpoint"
+
