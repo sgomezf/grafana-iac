@@ -325,7 +325,7 @@ Resources:
       Timeout: 300
       Environment:
         Variables:
-          WORKSPACE_ID:      !Ref GrafanaWorkspace
+          WORKSPACE_ID:      !Ref WorkspaceId
           WORKSPACE_ENDPOINT: !Ref WorkspaceEndpoint
           SSM_TOKEN_PATH:    !Sub "/grafana/${WorkspaceName}/admin-api-key"
       Code:
