@@ -152,7 +152,6 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - arn:aws:iam::aws:policy/service-role/AWSGrafanaAccountAdministrator 
       Policies:
         - PolicyName: GrafanaCustomResourcePolicy
           PolicyDocument:
@@ -325,6 +324,7 @@ Resources:
                       name        = "cfn-bootstrap-temp",
                       grafanaRole = "ADMIN",
                   )
+                  print(f"Service account created for bootstrap: {sa_resp}")
                   sa_id = sa_resp["serviceAccount"]["serviceAccountId"]
                   tok_resp = client.create_workspace_service_account_token(
                       workspaceId      = workspace_id,
