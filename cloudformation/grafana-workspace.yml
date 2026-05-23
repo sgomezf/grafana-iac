@@ -159,28 +159,3 @@ Outputs:
     Value: !Sub "https://${GrafanaWorkspace.Endpoint}"
     Export:
       Name: !Sub "${AWS::StackName}-WorkspaceEndpoint"
-
-  AlertTopicArn:
-    Description: SNS topic ARN for Grafana alerts
-    Value: !Ref GrafanaAlertTopic
-    Export:
-      Name: !Sub "${AWS::StackName}-AlertTopicArn"
-
-  GrafanaRoleArn:
-    Description: IAM role ARN assumed by the Grafana workspace
-    Value: !GetAtt GrafanaWorkspaceRole.Arn
-    Export:
-      Name: !Sub "${AWS::StackName}-GrafanaRoleArn"
-
-  ApiKeySSMPath:
-    Description: SSM path where the Grafana API key is stored
-    Value: !Sub "/grafana/${WorkspaceName}/admin-api-key"
-    Export:
-      Name: !Sub "${AWS::StackName}-ApiKeySSMPath"
-
-  GrafanaPluginInstallerFunctionArn:
-    Description: ARN of the Lambda function for installing Grafana plugins
-    Value: !GetAtt GrafanaPluginInstallerFunction.Arn
-    Export:
-      Name: !Sub "${AWS::StackName}-GrafanaPluginInstallerFunctionArn"
-
