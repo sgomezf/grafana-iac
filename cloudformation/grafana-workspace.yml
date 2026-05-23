@@ -147,17 +147,6 @@ Resources:
       # Enables plugins installation
       PluginAdminEnabled: true
 
-  # SSM Parameter — store API key securely for Lambda to read
-  GrafanaApiKeyParameter:
-    Type: AWS::SSM::Parameter
-    Properties:
-      Name: !Sub "/grafana/${WorkspaceName}/admin-api-key"
-      Type: String          # Use SecureString manually if needed (CFN limitation)
-      Value: !Ref GrafanaAdminApiKey
-      Description: Grafana Admin API key for custom resource Lambda
-      Tags:
-        ManagedBy: CloudFormation
-
   # IAM Role — Lambda execution role for custom resources
   CustomResourceLambdaRole:
     Type: AWS::IAM::Role

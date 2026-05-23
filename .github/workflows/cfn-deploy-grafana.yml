@@ -152,33 +152,33 @@ jobs:
           echo "🌐 Grafana Workspace URL: ${ENDPOINT}"
           echo "GRAFANA_URL=${ENDPOINT}" >> $GITHUB_ENV
 
-      - name: Deploy Grafana Configuration stack
-        id: configure-grafana
-        run: |
-          ENV="${{ github.event.inputs.environment || 'development' }}"
+      # - name: Deploy Grafana Configuration stack
+      #   id: configure-grafana
+      #   run: |
+      #     ENV="${{ github.event.inputs.environment || 'development' }}"
 
-          echo "🚀 Deploying stack: ${{ env.CONFIG_STACK_NAME }}"
+      #     echo "🚀 Deploying stack: ${{ env.CONFIG_STACK_NAME }}"
 
-          aws cloudformation deploy \
-            --template-file ${{ env.CONFIG_TEMPLATE_FILE }} \
-            --stack-name ${{ env.CONFIG_STACK_NAME }} \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              GrafanaApiKeyGeneratorFunctionArn="${{ steps.deploy-grafana.outputs.GrafanaApiKeyGeneratorFunctionArn }}" \
-              WorkspaceName="grafana-${ENV}" \
-              AlertEmailAddress="${{ steps.deploy-grafana.outputs.AlertEmailAddress || 'selene.gomez@gmail.com' }}" \
-              GrafanaAlertTopicName="${{ steps.deploy-grafana.outputs.GrafanaAlertTopicName || 'grafana-alerts' }}" \
-              GrafanaNotificationChannelFunctionArn="${{ steps.deploy-grafana.outputs.GrafanaNotificationChannelFunctionArn }}" \
-              GrafanaPluginInstallerFunctionArn="${{ steps.deploy-grafana.outputs.GrafanaPluginInstallerFunctionArn }}" \
-              PluginIds="grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel,camptocamp-prometheus-alertmanager-datasource" \
-            --tags \
-              Environment="${ENV}" \
-              ManagedBy="GitHubActions" \
-              Repository="${{ github.repository }}" \
-              Commit="${{ github.sha }}"
+      #     aws cloudformation deploy \
+      #       --template-file ${{ env.CONFIG_TEMPLATE_FILE }} \
+      #       --stack-name ${{ env.CONFIG_STACK_NAME }} \
+      #       --capabilities CAPABILITY_NAMED_IAM \
+      #       --no-fail-on-empty-changeset \
+      #       --parameter-overrides \
+      #         GrafanaApiKeyGeneratorFunctionArn="${{ steps.deploy-grafana.outputs.GrafanaApiKeyGeneratorFunctionArn }}" \
+      #         WorkspaceName="grafana-${ENV}" \
+      #         AlertEmailAddress="${{ steps.deploy-grafana.outputs.AlertEmailAddress || 'selene.gomez@gmail.com' }}" \
+      #         GrafanaAlertTopicName="${{ steps.deploy-grafana.outputs.GrafanaAlertTopicName || 'grafana-alerts' }}" \
+      #         GrafanaNotificationChannelFunctionArn="${{ steps.deploy-grafana.outputs.GrafanaNotificationChannelFunctionArn }}" \
+      #         GrafanaPluginInstallerFunctionArn="${{ steps.deploy-grafana.outputs.GrafanaPluginInstallerFunctionArn }}" \
+      #         PluginIds="grafana-piechart-panel,grafana-worldmap-panel,grafana-clock-panel,camptocamp-prometheus-alertmanager-datasource" \
+      #       --tags \
+      #         Environment="${ENV}" \
+      #         ManagedBy="GitHubActions" \
+      #         Repository="${{ github.repository }}" \
+      #         Commit="${{ github.sha }}"
 
-          echo "✅ Stack deployment complete"
+      #     echo "✅ Stack deployment complete"
 
 
 
