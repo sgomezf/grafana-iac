@@ -224,7 +224,7 @@ Resources:
                   tok_resp = client.create_workspace_service_account_token(
                       workspaceId      = workspace_id,
                       serviceAccountId = sa_id,
-                      name             = "cfn-bootstrap-temp-token",
+                      name             = "cfn-bootstrap-temp-token-" + str(int(time.time())),
                       secondsToLive    = 900000,
                   )
                   # Response is flat: { "key": "glsa_...", "id": "...", "name": "..." }
