@@ -142,10 +142,6 @@ Resources:
                   Type        = "SecureString",
                   Overwrite   = True,
                   Description = f"Grafana service account token for workspace {workspace_id}",
-                  Tags        = [
-                      {"Key": "ManagedBy",   "Value": "CloudFormation"},
-                      {"Key": "WorkspaceId", "Value": workspace_id},
-                  ],
               )
               print(f"Token stored at SSM path: {SSM_PATH}")
 
