@@ -437,7 +437,7 @@ Resources:
 
                   if request_type in ("Create", "Update"):
                       # Step 1 — enable plugin management at workspace level
-                      enable_plugin_admin()
+                      # enable_plugin_admin()
 
                       if not plugin_ids:
                           cfnresponse.send(event, context, cfnresponse.SUCCESS,
