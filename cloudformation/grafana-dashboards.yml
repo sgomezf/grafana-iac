@@ -143,6 +143,7 @@ Resources:
           # ── helpers ─────────────────────────────────────────────
 
           def get_token():
+              print(f"GETTING PARAMETERS {SSM_TOKEN_PATH}")
               resp = ssm.get_parameter(
                   Name=os.environ["SSM_TOKEN_PATH"], WithDecryption=True)
               return resp["Parameter"]["Value"]
