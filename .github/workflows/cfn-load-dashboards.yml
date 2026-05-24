@@ -116,7 +116,7 @@ jobs:
         run: |
           ENV="${{ github.event.inputs.environment || 'development' }}"
           BUCKET="grafana-dashboards-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
-          echo "bucket_name=${BUCKET}" >> $GITHUB_OUTPUT
+          echo "name=${BUCKET}" >> $GITHUB_OUTPUT
           echo "🪣 Bucket: ${BUCKET}"
 
       # Create the bucket directly via AWS CLI if it doesn't exist yet.
