@@ -128,12 +128,7 @@ jobs:
             echo "✅ Bucket already exists: ${BUCKET}"
           else
             echo "🪣 Creating bucket: ${BUCKET}"
-            if [ "${{ env.AWS_REGION }}" = "us-east-1" ]; then
-              aws s3api create-bucket --bucket "${BUCKET}"
-            else
-              aws s3api create-bucket --bucket "${BUCKET}" \
-                --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }}
-            fi
+            aws s3api create-bucket --bucket "${BUCKET}"
 
             # Enable versioning and encryption
             aws s3api put-bucket-versioning \
