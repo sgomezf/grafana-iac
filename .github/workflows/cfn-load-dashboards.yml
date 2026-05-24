@@ -247,6 +247,7 @@ jobs:
             --stack-name ${{ env.STACK_NAME }} \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
+            --import-existing-resources
             --parameter-overrides \
               GrafanaWorkspaceId="${{ secrets.GRAFANA_WORKSPACE_ID }}" \
               GrafanaWorkspaceEndpoint="${{ secrets.GRAFANA_WORKSPACE_ENDPOINT }}" \
