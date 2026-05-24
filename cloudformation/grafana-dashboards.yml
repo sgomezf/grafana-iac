@@ -120,7 +120,7 @@ Resources:
       Environment:
         Variables:
           WORKSPACE_ENDPOINT: !Ref GrafanaWorkspaceEndpoint
-          SSM_TOKEN_PATH:     "/grafana/grafana-development/admin-api-key"
+          SSM_TOKEN_PATH:     !Ref GrafanaServiceAccountTokenSSMPath
           BUCKET_NAME:        !Ref DashboardsBucketName
           DASHBOARDS_PREFIX:  !Ref DashboardsPrefix
           FOLDER_ID:          !Ref GrafanaFolderId
@@ -132,6 +132,11 @@ Resources:
           import urllib.error
           import boto3
           import cfnresponse
+          
+          import logging
+          logger = logging.getLogger()
+          logger.setLevel("INFO")
+
 
           s3       = boto3.client("s3")
           ssm      = boto3.client("ssm")
@@ -139,6 +144,7 @@ Resources:
           BUCKET   = os.environ["BUCKET_NAME"]
           PREFIX   = os.environ["DASHBOARDS_PREFIX"]
           FOLDER   = int(os.environ.get("FOLDER_ID", "0"))
+          SSM_TOKEN_PATH = os.environ["SSM_TOKEN_PATH"]
 
           # ── helpers ─────────────────────────────────────────────
 
