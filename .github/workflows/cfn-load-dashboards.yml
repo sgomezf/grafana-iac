@@ -13,12 +13,12 @@ on:
       environment:
         description: "Target environment"
         required: true
-        default: "dev"
+        default: "development"
         type: choice
         options:
-          - dev
+          - development
           - staging
-          - prod
+          - production
       action:
         description: "Action to run"
         required: true
