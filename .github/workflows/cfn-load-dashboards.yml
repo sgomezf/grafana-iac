@@ -174,9 +174,17 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Resolve bucket name
+        id: bucket
+        run: |
+          ENV="${{ github.event.inputs.environment || 'development' }}"
+          BUCKET="grafana-dashboards-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
+          echo "name=${BUCKET}" >> $GITHUB_OUTPUT
+          echo "🪣 Bucket: ${BUCKET}"
+
       - name: Sync dashboards to S3
         run: |
-          BUCKET="grafana-dashboards-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
+          BUCKET="${{ steps.bucket.outputs.name }}"
           echo "⬆️  Syncing ${{ env.DASHBOARDS_DIR }}/ → s3://${BUCKET}/dashboards/"
 
           aws s3 sync ${{ env.DASHBOARDS_DIR }}/ \
