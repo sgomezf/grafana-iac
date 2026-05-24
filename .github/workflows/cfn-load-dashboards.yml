@@ -32,7 +32,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AWS_REGION: us-east-2
+  AWS_REGION: us-east-1
   STACK_NAME: grafana-dashboard-loader-${{ github.event.inputs.environment || 'development' }}
   TEMPLATE_FILE: cloudformation/grafana-dashboards.yml
   DASHBOARDS_DIR: dashboards
@@ -128,7 +128,12 @@ jobs:
             echo "✅ Bucket already exists: ${BUCKET}"
           else
             echo "🪣 Creating bucket: ${BUCKET}"
-            aws s3api create-bucket --bucket "${BUCKET}"
+            if [ "${{ env.AWS_REGION }}" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "${BUCKET}"
+            else
+              aws s3api create-bucket --bucket "${BUCKET}" \
+                --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }}
+            fi
 
             # Enable versioning and encryption
             aws s3api put-bucket-versioning \
