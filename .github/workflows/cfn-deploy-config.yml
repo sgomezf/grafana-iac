@@ -104,7 +104,7 @@ jobs:
               WorkspaceName="grafana-${ENV}" \
               WorkspaceEndpoint="https://g-d107f399a5.grafana-workspace.us-east-2.amazonaws.com/" \
               WorkspaceId="g-d107f399a5" \
-              PluginIds="clock-panel,prometheus" \
+              PluginIds="grafana-redshift-datasource" \
             --tags \
               Environment="${ENV}" \
               ManagedBy="GitHubActions" \
