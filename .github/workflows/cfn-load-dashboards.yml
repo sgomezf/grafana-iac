@@ -102,9 +102,9 @@ jobs:
             --no-fail-on-empty-changeset \
             --parameter-overrides \
               WorkspaceName="grafana-${ENV}" \
-              WorkspaceEndpoint="https://g-d107f399a5.grafana-workspace.us-east-2.amazonaws.com/" \
-              WorkspaceId="g-d107f399a5" \
-              PluginIds="grafana-redshift-datasource" \
+              GrafanaWorkspaceEndpoint="https://g-d107f399a5.grafana-workspace.us-east-2.amazonaws.com/" \
+              GrafanaWorkspaceId="g-d107f399a5" \
+              GrafanaServiceAccountTokenSSMPath="/grafana/${ENV}/service-account-token" \
             --tags \
               Environment="${ENV}" \
               ManagedBy="GitHubActions" \
