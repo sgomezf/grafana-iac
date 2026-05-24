@@ -32,7 +32,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: us-east-2
   STACK_NAME: grafana-dashboard-loader-${{ github.event.inputs.environment || 'development' }}
   TEMPLATE_FILE: cloudformation/grafana-dashboards.yml
   DASHBOARDS_DIR: dashboards
@@ -197,63 +197,71 @@ jobs:
           echo "✅ ${COUNT} dashboard(s) now in S3"
 
   # Deploy/update the CFN stack.
-  # deploy:
-  #   name: Deploy CFN Stack
-  #   runs-on: ubuntu-latest
-  #   needs: [bootstrap-bucket, upload-dashboards]
-  #   environment: ${{ github.event.inputs.environment || 'development' }}
-  #   permissions:
-  #     contents: read
+  deploy:
+    name: Deploy CFN Stack
+    runs-on: ubuntu-latest
+    needs: [bootstrap-bucket, upload-dashboards]
+    environment: ${{ github.event.inputs.environment || 'development' }}
+    permissions:
+      contents: read
 
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  #     - name: Configure AWS credentials
-  #       uses: aws-actions/configure-aws-credentials@v4
-  #       with:
-  #         aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-  #         aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-  #         aws-region: ${{ env.AWS_REGION }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-  #     - name: Resolve next DashboardsVersion
-  #       id: version
-  #       run: |
-  #         CURRENT=$(aws cloudformation describe-stacks \
-  #           --stack-name ${{ env.STACK_NAME }} \
-  #           --query "Stacks[0].Parameters[?ParameterKey=='DashboardsVersion'].ParameterValue" \
-  #           --output text 2>/dev/null || echo "0")
-  #         NEW=$((CURRENT + 1))
-  #         echo "version=${NEW}" >> $GITHUB_OUTPUT
-  #         echo "🔢 DashboardsVersion: ${CURRENT} → ${NEW}"
+      - name: Resolve next DashboardsVersion
+        id: version
+        run: |
+          CURRENT=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --query "Stacks[0].Parameters[?ParameterKey=='DashboardsVersion'].ParameterValue" \
+            --output text 2>/dev/null || echo "0")
+          NEW=$((CURRENT + 1))
+          echo "version=${NEW}" >> $GITHUB_OUTPUT
+          echo "🔢 DashboardsVersion: ${CURRENT} → ${NEW}"
 
-      # - name: Deploy CloudFormation stack
-      #   run: |
-      #     ENV="${{ github.event.inputs.environment || 'development' }}"
-      #     BUCKET="${{ needs.bootstrap-bucket.outputs.bucket_name }}"
+      - name: Resolve bucket name
+        id: bucket
+        run: |
+          ENV="${{ github.event.inputs.environment || 'development' }}"
+          BUCKET="grafana-dashboards-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
+          echo "name=${BUCKET}" >> $GITHUB_OUTPUT
+          echo "🪣 Bucket: ${BUCKET}"
 
-      #     echo "🚀 Deploying ${{ env.STACK_NAME }}"
+      - name: Deploy CloudFormation stack
+        run: |
+          ENV="${{ github.event.inputs.environment || 'development' }}"
+          BUCKET="${{ steps.bucket.outputs.name }}"
 
-      #     aws cloudformation deploy \
-      #       --template-file ${{ env.TEMPLATE_FILE }} \
-      #       --stack-name ${{ env.STACK_NAME }} \
-      #       --capabilities CAPABILITY_NAMED_IAM \
-      #       --no-fail-on-empty-changeset \
-      #       --parameter-overrides \
-      #         GrafanaWorkspaceId="${{ secrets.GRAFANA_WORKSPACE_ID }}" \
-      #         GrafanaWorkspaceEndpoint="${{ secrets.GRAFANA_WORKSPACE_ENDPOINT }}" \
-      #         GrafanaServiceAccountTokenSSMPath="${{ secrets.GRAFANA_API_KEY_SSM_PATH }}" \
-      #         GrafanaFolderId="0" \
-      #         DashboardsBucketName="${BUCKET}" \
-      #         DashboardsPrefix="dashboards/" \
-      #         DashboardsVersion="${{ steps.version.outputs.version }}" \
-      #       --tags \
-      #         Environment="${ENV}" \
-      #         ManagedBy="GitHubActions" \
-      #         Repository="${{ github.repository }}" \
-      #         Commit="${{ github.sha }}"
+          echo "🚀 Deploying ${{ env.STACK_NAME }}"
 
-      #     echo "✅ Stack deployed"
+          aws cloudformation deploy \
+            --template-file ${{ env.TEMPLATE_FILE }} \
+            --stack-name ${{ env.STACK_NAME }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              GrafanaWorkspaceId="${{ secrets.GRAFANA_WORKSPACE_ID }}" \
+              GrafanaWorkspaceEndpoint="${{ secrets.GRAFANA_WORKSPACE_ENDPOINT }}" \
+              GrafanaServiceAccountTokenSSMPath="${{ secrets.GRAFANA_API_KEY_SSM_PATH }}" \
+              GrafanaFolderId="0" \
+              DashboardsBucketName="${BUCKET}" \
+              DashboardsPrefix="dashboards/" \
+              DashboardsVersion="${{ steps.version.outputs.version }}" \
+            --tags \
+              Environment="${ENV}" \
+              ManagedBy="GitHubActions" \
+              Repository="${{ github.repository }}" \
+              Commit="${{ github.sha }}"
+
+          echo "✅ Stack deployed"
 
       - name: Print summary
         run: |
