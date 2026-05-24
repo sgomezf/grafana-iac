@@ -1,54 +1,54 @@
-name: Load Dashboards to Grafana
+name: Deploy Grafana Dashboard Loader
 
 on:
   push:
     branches:
       - main
     paths:
-      - "dashboards/*.json"
+      - "cfn-load-dashboards.yml"
+      - "dashboards/**"
       - ".github/workflows/cfn-load-dashboards.yml"
   workflow_dispatch:
     inputs:
       environment:
         description: "Target environment"
         required: true
-        default: "development"
+        default: "dev"
         type: choice
         options:
-          - development
-          - production
+          - dev
+          - staging
+          - prod
       action:
-        description: "Stack action"
+        description: "Action to run"
         required: true
         default: "deploy"
         type: choice
         options:
-          - deploy
+          - deploy    # Deploy/update stack + load dashboards from repo
           - delete
 
-# Prevent concurrent deployments to the same environment
 concurrency:
-  group: grafana-dashboards-${{ github.event.inputs.environment || 'development' }}
+  group: grafana-dashboards-${{ github.event.inputs.environment || 'dev' }}
   cancel-in-progress: false
 
 env:
-  AWS_REGION: us-east-2
-  DASHBOARD_STACK_NAME: grafana-dashboards-${{ github.event.inputs.environment || 'development' }}
-  DASHBOARD_TEMPLATE_FILE: cloudformation/grafana-dasboards.yml
+  AWS_REGION: us-east-1
+  STACK_NAME: grafana-dashboard-loader-${{ github.event.inputs.environment || 'dev' }}
+  TEMPLATE_FILE: cfn-load-dashboards.yml
+  DASHBOARDS_DIR: dashboards
 
 jobs:
-  # ------------------------------------------------------------------
-  # Validate the CloudFormation template before any deployment attempt
-  # ------------------------------------------------------------------
+
   validate:
-    name: Validate Template
+    name: Validate
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'development' }}
+    if: github.event.inputs.action != 'delete'
     permissions:
       contents: read
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Configure AWS credentials
@@ -58,27 +58,112 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Validate Grafana CloudFormation template
+      - name: Validate CloudFormation template
         run: |
           aws cloudformation validate-template \
-            --template-body file://${{ env.DASHBOARD_TEMPLATE_FILE }}
-          echo "✅ Template validation passed"
+            --template-body file://${{ env.TEMPLATE_FILE }}
+          echo "✅ Template valid"
 
-  # ------------------------------------------------------------------
-  # Deploy (create or update) the Gragana CloudFormation stack
-  # ------------------------------------------------------------------
-  deploy-grafana:
-    name: Load Dashboards to Grafana
+      - name: Check dashboards folder
+        run: |
+          if [ ! -d "${{ env.DASHBOARDS_DIR }}" ]; then
+            echo "❌ '${{ env.DASHBOARDS_DIR }}/' not found in repo root"
+            exit 1
+          fi
+          COUNT=$(find ${{ env.DASHBOARDS_DIR }} -name "*.json" | wc -l | tr -d ' ')
+          echo "📊 Found ${COUNT} dashboard(s):"
+          find ${{ env.DASHBOARDS_DIR }} -name "*.json" | sort | sed 's/^/   /'
+
+  build-payload:
+    name: Build Dashboard Payload
     runs-on: ubuntu-latest
     needs: validate
     if: github.event.inputs.action != 'delete'
+    permissions:
+      contents: read
+    outputs:
+      payload: ${{ steps.encode.outputs.payload }}
+      count:   ${{ steps.encode.outputs.count }}
 
-    environment: ${{ github.event.inputs.environment || 'development' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Encode dashboards into base64 payload
+        id: encode
+        run: |
+          DASHBOARDS_DIR="${{ env.DASHBOARDS_DIR }}"
+          FILES=$(find "$DASHBOARDS_DIR" -name "*.json" | sort)
+          COUNT=$(echo "$FILES" | grep -c '.json' || true)
+
+          echo "Building payload for ${COUNT} dashboard(s)..."
+
+          # Build JSON array using Python for reliable encoding
+          python3 << 'PYEOF'
+          import base64, json, os, sys
+
+          dashboards_dir = os.environ.get("DASHBOARDS_DIR", "dashboards")
+          files = sorted(f for f in __import__('glob').glob(f"{dashboards_dir}/**/*.json", recursive=True))
+
+          entries = []
+          for filepath in files:
+              filename = os.path.basename(filepath)
+              with open(filepath, "rb") as f:
+                  raw = f.read()
+
+              # Validate it's parseable JSON before encoding
+              try:
+                  json.loads(raw)
+              except json.JSONDecodeError as e:
+                  print(f"ERROR: {filepath} is not valid JSON: {e}", file=sys.stderr)
+                  sys.exit(1)
+
+              entries.append({
+                  "filename": filename,
+                  "content":  base64.b64encode(raw).decode("utf-8"),
+              })
+              print(f"  Encoded: {filename} ({len(raw)} bytes)")
+
+          # Outer base64 keeps the CFN parameter value simple and safe
+          payload_json  = json.dumps(entries)
+          payload_b64   = base64.b64encode(payload_json.encode("utf-8")).decode("utf-8")
+
+          # Write to GitHub env for next step
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"payload={payload_b64}\n")
+              f.write(f"count={len(entries)}\n")
+
+          print(f"\n✅ Payload built — {len(entries)} dashboard(s), {len(payload_b64)} chars")
+          PYEOF
+        env:
+          DASHBOARDS_DIR: ${{ env.DASHBOARDS_DIR }}
+
+      - name: Check payload size
+        run: |
+          PAYLOAD="${{ steps.encode.outputs.payload }}"
+          SIZE=${#PAYLOAD}
+          echo "📦 Payload size: ${SIZE} chars"
+
+          # CFN parameter value limit is 4096 bytes
+          if [ "$SIZE" -gt 4096 ]; then
+            echo "⚠️  WARNING: payload exceeds CFN 4096-char parameter limit (${SIZE} chars)."
+            echo "   Consider splitting dashboards across multiple stacks."
+            exit 1
+          fi
+
+          echo "✅ Payload within CFN parameter limit"
+
+  deploy:
+    name: Deploy Stack + Load Dashboards
+    runs-on: ubuntu-latest
+    needs: [validate, build-payload]
+    if: github.event.inputs.action != 'delete'
+    environment: ${{ github.event.inputs.environment || 'dev' }}
     permissions:
       contents: read
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Configure AWS credentials
@@ -88,30 +173,75 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Deploy Grafana Configuration stack
-        id: configure-grafana
+      - name: Resolve next DashboardsVersion
+        id: version
         run: |
-          ENV="${{ github.event.inputs.environment || 'development' }}"
+          # Increment version on every deploy to guarantee CFN triggers Update
+          # even if the payload hash somehow didn't change
+          CURRENT=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --query "Stacks[0].Parameters[?ParameterKey=='DashboardsVersion'].ParameterValue" \
+            --output text 2>/dev/null || echo "0")
 
-          echo "🚀 Deploying stack: ${{ env.DASHBOARD_STACK_NAME }}"
+          NEW=$((CURRENT + 1))
+          echo "version=${NEW}" >> $GITHUB_OUTPUT
+          echo "🔢 DashboardsVersion: ${CURRENT} → ${NEW}"
+
+      - name: Deploy CloudFormation stack
+        run: |
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          echo "🚀 Deploying ${{ env.STACK_NAME }} with ${{ needs.build-payload.outputs.count }} dashboard(s)"
 
           aws cloudformation deploy \
-            --template-file ${{ env.DASHBOARD_TEMPLATE_FILE }} \
-            --stack-name ${{ env.DASHBOARD_STACK_NAME }} \
+            --template-file ${{ env.TEMPLATE_FILE }} \
+            --stack-name ${{ env.STACK_NAME }} \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
             --parameter-overrides \
-              WorkspaceName="grafana-${ENV}" \
-              GrafanaWorkspaceEndpoint="https://g-d107f399a5.grafana-workspace.us-east-2.amazonaws.com/" \
               GrafanaWorkspaceId="g-d107f399a5" \
-              GrafanaServiceAccountTokenSSMPath="/grafana/${ENV}/service-account-token" \
+              GrafanaWorkspaceEndpoint="https://g-d107f399a5.grafana-workspace.us-east-2.amazonaws.com/" \
+              GrafanaServiceAccountTokenSSMPath="/grafana/grafana-development/admin-api-key" \
+              GrafanaFolderId="0" \
+              DashboardsPayload="${{ needs.build-payload.outputs.payload }}" \
+              DashboardsVersion="${{ steps.version.outputs.version }}" \
             --tags \
               Environment="${ENV}" \
               ManagedBy="GitHubActions" \
               Repository="${{ github.repository }}" \
               Commit="${{ github.sha }}"
 
-          echo "✅ Stack deployment complete"
+          echo "✅ Stack deployed"
 
+      - name: Print summary
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════════╗"
+          echo "║  ✅  Dashboards loaded into Grafana                          ║"
+          echo "╠══════════════════════════════════════════════════════════════╣"
+          echo "║  📊  ${{ needs.build-payload.outputs.count }} dashboard(s) imported"
+          echo "║  🌐  ${{ secrets.GRAFANA_WORKSPACE_ENDPOINT }}"
+          echo "╚══════════════════════════════════════════════════════════════╝"
 
+  delete:
+    name: Delete Stack
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'delete'
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    permissions:
+      contents: read
 
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Delete CloudFormation stack
+        run: |
+          echo "🗑️  Deleting ${{ env.STACK_NAME }}"
+          aws cloudformation delete-stack --stack-name ${{ env.STACK_NAME }}
+          aws cloudformation wait stack-delete-complete \
+            --stack-name ${{ env.STACK_NAME }}
+          echo "✅ Stack deleted"
