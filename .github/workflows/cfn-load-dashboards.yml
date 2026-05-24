@@ -13,7 +13,7 @@ on:
       environment:
         description: "Target environment"
         required: true
-        default: "development"
+        default: "dev"
         type: choice
         options:
           - development
@@ -24,16 +24,17 @@ on:
         default: "deploy"
         type: choice
         options:
-          - deploy    # Deploy/update stack + load dashboards from repo
+          - deploy   # Upload dashboards to S3 then deploy/update CFN stack
+          - delete
 
 concurrency:
   group: grafana-dashboards-${{ github.event.inputs.environment || 'development' }}
   cancel-in-progress: false
 
 env:
-  AWS_REGION: us-east-2
+  AWS_REGION: us-east-1
   STACK_NAME: grafana-dashboard-loader-${{ github.event.inputs.environment || 'development' }}
-  TEMPLATE_FILE: cloudformation/grafana-dashboards.yml
+  TEMPLATE_FILE: grafana-dashboard-loader.yml
   DASHBOARDS_DIR: dashboards
 
 jobs:
@@ -41,7 +42,6 @@ jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'development' }}
     permissions:
       contents: read
 
@@ -68,92 +68,133 @@ jobs:
             echo "❌ '${{ env.DASHBOARDS_DIR }}/' not found in repo root"
             exit 1
           fi
+
           COUNT=$(find ${{ env.DASHBOARDS_DIR }} -name "*.json" | wc -l | tr -d ' ')
-          echo "📊 Found ${COUNT} dashboard(s):"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "❌ No .json files found in ${{ env.DASHBOARDS_DIR }}/"
+            exit 1
+          fi
+
+          echo "✅ Found ${COUNT} dashboard(s):"
           find ${{ env.DASHBOARDS_DIR }} -name "*.json" | sort | sed 's/^/   /'
 
-  build-payload:
-    name: Build Dashboard Payload
+          # Validate each file is parseable JSON
+          echo "Validating JSON syntax..."
+          find ${{ env.DASHBOARDS_DIR }} -name "*.json" | while read f; do
+            python3 -c "import json,sys; json.load(open('$f'))" \
+              && echo "  OK: $f" \
+              || { echo "  ❌ Invalid JSON: $f"; exit 1; }
+          done
+          echo "✅ All files are valid JSON"
+
+  # First create the S3 bucket if it doesn't exist.
+  bootstrap-bucket:
+    name: Bootstrap S3 Bucket
     runs-on: ubuntu-latest
     needs: validate
+    if: github.event.inputs.action != 'delete'
+    environment: ${{ github.event.inputs.environment || 'development' }}
     permissions:
       contents: read
     outputs:
-      payload: ${{ steps.encode.outputs.payload }}
-      count:   ${{ steps.encode.outputs.count }}
+      bucket_name: ${{ steps.bucket.outputs.name }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Encode dashboards into base64 payload
-        id: encode
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve bucket name
+        id: bucket
         run: |
-          DASHBOARDS_DIR="${{ env.DASHBOARDS_DIR }}"
-          FILES=$(find "$DASHBOARDS_DIR" -name "*.json" | sort)
-          COUNT=$(echo "$FILES" | grep -c '.json' || true)
+          ENV="${{ github.event.inputs.environment || 'development' }}"
+          BUCKET="grafana-dashboards-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
+          echo "name=${BUCKET}" >> $GITHUB_OUTPUT
+          echo "🪣 Bucket: ${BUCKET}"
 
-          echo "Building payload for ${COUNT} dashboard(s)..."
-
-          # Build JSON array using Python for reliable encoding
-          python3 << 'PYEOF'
-          import base64, json, os, sys
-
-          dashboards_dir = os.environ.get("DASHBOARDS_DIR", "dashboards")
-          files = sorted(f for f in __import__('glob').glob(f"{dashboards_dir}/**/*.json", recursive=True))
-
-          entries = []
-          for filepath in files:
-              filename = os.path.basename(filepath)
-              with open(filepath, "rb") as f:
-                  raw = f.read()
-
-              # Validate it's parseable JSON before encoding
-              try:
-                  json.loads(raw)
-              except json.JSONDecodeError as e:
-                  print(f"ERROR: {filepath} is not valid JSON: {e}", file=sys.stderr)
-                  sys.exit(1)
-
-              entries.append({
-                  "filename": filename,
-                  "content":  base64.b64encode(raw).decode("utf-8"),
-              })
-              print(f"  Encoded: {filename} ({len(raw)} bytes)")
-
-          # Outer base64 keeps the CFN parameter value simple and safe
-          payload_json  = json.dumps(entries)
-          payload_b64   = base64.b64encode(payload_json.encode("utf-8")).decode("utf-8")
-
-          # Write to GitHub env for next step
-          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-              f.write(f"payload={payload_b64}\n")
-              f.write(f"count={len(entries)}\n")
-
-          print(f"\n✅ Payload built — {len(entries)} dashboard(s), {len(payload_b64)} chars")
-          PYEOF
-        env:
-          DASHBOARDS_DIR: ${{ env.DASHBOARDS_DIR }}
-
-      - name: Check payload size
+      # Create the bucket directly via AWS CLI if it doesn't exist yet.
+      # The CFN stack will later adopt it via the DashboardsBucketName parameter.
+      - name: Ensure S3 bucket exists
         run: |
-          PAYLOAD="${{ steps.encode.outputs.payload }}"
-          SIZE=${#PAYLOAD}
-          echo "📦 Payload size: ${SIZE} chars"
+          BUCKET="${{ steps.bucket.outputs.name }}"
 
-          # CFN parameter value limit is 4096 bytes
-          if [ "$SIZE" -gt 4096 ]; then
-            echo "⚠️  WARNING: payload exceeds CFN 4096-char parameter limit (${SIZE} chars)."
-            echo "   Consider splitting dashboards across multiple stacks."
-            exit 1
+          if aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
+            echo "✅ Bucket already exists: ${BUCKET}"
+          else
+            echo "🪣 Creating bucket: ${BUCKET}"
+            if [ "${{ env.AWS_REGION }}" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "${BUCKET}"
+            else
+              aws s3api create-bucket --bucket "${BUCKET}" \
+                --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }}
+            fi
+
+            # Enable versioning and encryption
+            aws s3api put-bucket-versioning \
+              --bucket "${BUCKET}" \
+              --versioning-configuration Status=Enabled
+
+            aws s3api put-bucket-encryption \
+              --bucket "${BUCKET}" \
+              --server-side-encryption-configuration \
+                '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+
+            aws s3api put-public-access-block \
+              --bucket "${BUCKET}" \
+              --public-access-block-configuration \
+                "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+
+            echo "✅ Bucket created and configured: ${BUCKET}"
           fi
 
-          echo "✅ Payload within CFN parameter limit"
 
-  deploy:
-    name: Deploy Stack + Load Dashboards
+  # Upload Dashboards — sync repo dashboards/ folder to S3.
+  upload-dashboards:
+    name: Upload Dashboards → S3
     runs-on: ubuntu-latest
-    needs: [validate, build-payload]
+    needs: bootstrap-bucket
+    if: github.event.inputs.action != 'delete'
+    environment: ${{ github.event.inputs.environment || 'development' }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Sync dashboards to S3
+        run: |
+          BUCKET="${{ needs.bootstrap-bucket.outputs.bucket_name }}"
+          echo "⬆️  Syncing ${{ env.DASHBOARDS_DIR }}/ → s3://${BUCKET}/dashboards/"
+
+          aws s3 sync ${{ env.DASHBOARDS_DIR }}/ \
+            s3://${BUCKET}/dashboards/ \
+            --include "*.json" \
+            --delete \
+            --content-type "application/json"
+
+          COUNT=$(aws s3 ls s3://${BUCKET}/dashboards/ | grep -c '\.json' || true)
+          echo "✅ ${COUNT} dashboard(s) now in S3"
+
+  # Deploy/update the CFN stack.
+  deploy:
+    name: Deploy CFN Stack
+    runs-on: ubuntu-latest
+    needs: [bootstrap-bucket, upload-dashboards]
+    if: github.event.inputs.action != 'delete'
     environment: ${{ github.event.inputs.environment || 'development' }}
     permissions:
       contents: read
@@ -172,49 +213,93 @@ jobs:
       - name: Resolve next DashboardsVersion
         id: version
         run: |
-          # Increment version on every deploy to guarantee CFN triggers Update
-          # even if the payload hash somehow didn't change
           CURRENT=$(aws cloudformation describe-stacks \
             --stack-name ${{ env.STACK_NAME }} \
             --query "Stacks[0].Parameters[?ParameterKey=='DashboardsVersion'].ParameterValue" \
             --output text 2>/dev/null || echo "0")
-
           NEW=$((CURRENT + 1))
           echo "version=${NEW}" >> $GITHUB_OUTPUT
           echo "🔢 DashboardsVersion: ${CURRENT} → ${NEW}"
 
-      - name: Deploy CloudFormation stack
-        run: |
-          ENV="${{ github.event.inputs.environment || 'development' }}"
-          echo "🚀 Deploying ${{ env.STACK_NAME }} with ${{ needs.build-payload.outputs.count }} dashboard(s)"
+      # - name: Deploy CloudFormation stack
+      #   run: |
+      #     ENV="${{ github.event.inputs.environment || 'development' }}"
+      #     BUCKET="${{ needs.bootstrap-bucket.outputs.bucket_name }}"
 
-          aws cloudformation deploy \
-            --template-file ${{ env.TEMPLATE_FILE }} \
-            --stack-name ${{ env.STACK_NAME }} \
-            --capabilities CAPABILITY_NAMED_IAM \
-            --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              GrafanaWorkspaceId="g-d107f399a5" \
-              GrafanaWorkspaceEndpoint="https://g-d107f399a5.grafana-workspace.us-east-2.amazonaws.com/" \
-              GrafanaServiceAccountTokenSSMPath="/grafana/grafana-development/admin-api-key" \
-              GrafanaFolderId="0" \
-              DashboardsPayload="${{ needs.build-payload.outputs.payload }}" \
-              DashboardsVersion="${{ steps.version.outputs.version }}" \
-            --tags \
-              Environment="${ENV}" \
-              ManagedBy="GitHubActions" \
-              Repository="${{ github.repository }}" \
-              Commit="${{ github.sha }}"
+      #     echo "🚀 Deploying ${{ env.STACK_NAME }}"
 
-          echo "✅ Stack deployed"
+      #     aws cloudformation deploy \
+      #       --template-file ${{ env.TEMPLATE_FILE }} \
+      #       --stack-name ${{ env.STACK_NAME }} \
+      #       --capabilities CAPABILITY_NAMED_IAM \
+      #       --no-fail-on-empty-changeset \
+      #       --parameter-overrides \
+      #         GrafanaWorkspaceId="${{ secrets.GRAFANA_WORKSPACE_ID }}" \
+      #         GrafanaWorkspaceEndpoint="${{ secrets.GRAFANA_WORKSPACE_ENDPOINT }}" \
+      #         GrafanaServiceAccountTokenSSMPath="${{ secrets.GRAFANA_API_KEY_SSM_PATH }}" \
+      #         GrafanaFolderId="0" \
+      #         DashboardsBucketName="${BUCKET}" \
+      #         DashboardsPrefix="dashboards/" \
+      #         DashboardsVersion="${{ steps.version.outputs.version }}" \
+      #       --tags \
+      #         Environment="${ENV}" \
+      #         ManagedBy="GitHubActions" \
+      #         Repository="${{ github.repository }}" \
+      #         Commit="${{ github.sha }}"
+
+      #     echo "✅ Stack deployed"
 
       - name: Print summary
         run: |
+          BUCKET="${{ needs.bootstrap-bucket.outputs.bucket_name }}"
+          COUNT=$(aws s3 ls s3://${BUCKET}/dashboards/ | grep -c '\.json' || true)
+
           echo ""
           echo "╔══════════════════════════════════════════════════════════════╗"
           echo "║  ✅  Dashboards loaded into Grafana                          ║"
           echo "╠══════════════════════════════════════════════════════════════╣"
-          echo "║  📊  ${{ needs.build-payload.outputs.count }} dashboard(s) imported"
+          echo "║  📊  ${COUNT} dashboard(s) synced and imported"
+          echo "║  🪣  s3://${BUCKET}/dashboards/"
           echo "║  🌐  ${{ secrets.GRAFANA_WORKSPACE_ENDPOINT }}"
           echo "╚══════════════════════════════════════════════════════════════╝"
 
+
+  # Delete — empty the bucket first, then delete the CFN stack.
+  delete:
+    name: Delete Stack
+    runs-on: ubuntu-latest
+    if: github.event.inputs.action == 'delete'
+    environment: ${{ github.event.inputs.environment || 'development' }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Empty S3 bucket before stack deletion
+        run: |
+          BUCKET=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --query "Stacks[0].Outputs[?OutputKey=='DashboardsBucketName'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+
+          if [ -n "$BUCKET" ]; then
+            echo "🧹 Emptying bucket: ${BUCKET}"
+            aws s3 rm s3://${BUCKET} --recursive
+            echo "✅ Bucket emptied"
+          else
+            echo "ℹ️  No bucket found in stack outputs — skipping"
+          fi
+
+      - name: Delete CloudFormation stack
+        run: |
+          echo "🗑️  Deleting ${{ env.STACK_NAME }}"
+          aws cloudformation delete-stack --stack-name ${{ env.STACK_NAME }}
+          aws cloudformation wait stack-delete-complete \
+            --stack-name ${{ env.STACK_NAME }}
+          echo "✅ Stack deleted"
