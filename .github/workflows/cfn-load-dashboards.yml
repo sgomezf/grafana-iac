@@ -178,6 +178,7 @@ jobs:
       - name: Sync dashboards to S3
         run: |
           BUCKET="${{ needs.bootstrap-bucket.outputs.bucket_name }}"
+          echo "CONTEXT ${{ needs.bootstrap-bucket.outputs.bucket_name }}"
           echo "⬆️  Syncing ${{ env.DASHBOARDS_DIR }}/ → s3://${BUCKET}/dashboards/"
 
           aws s3 sync ${{ env.DASHBOARDS_DIR }}/ \
