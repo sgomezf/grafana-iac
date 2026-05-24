@@ -250,7 +250,7 @@ jobs:
             --parameter-overrides \
               GrafanaWorkspaceId="${{ secrets.GRAFANA_WORKSPACE_ID }}" \
               GrafanaWorkspaceEndpoint="${{ secrets.GRAFANA_WORKSPACE_ENDPOINT }}" \
-              GrafanaServiceAccountTokenSSMPath="/grafana/grafana-development/admin-api-key" \
+              GrafanaServiceAccountTokenSSMPath="${{ secrets.GRAFANA_API_KEY_SSM_PATH }}" \
               GrafanaFolderId="0" \
               DashboardsBucketName="${BUCKET}" \
               DashboardsPrefix="dashboards/" \

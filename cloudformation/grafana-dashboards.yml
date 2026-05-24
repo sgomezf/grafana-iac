@@ -120,7 +120,7 @@ Resources:
       Environment:
         Variables:
           WORKSPACE_ENDPOINT: !Ref GrafanaWorkspaceEndpoint
-          SSM_TOKEN_PATH:     !Ref GrafanaServiceAccountTokenSSMPath
+          SSM_TOKEN_PATH:     "/grafana/grafana-development/admin-api-key"
           BUCKET_NAME:        !Ref DashboardsBucketName
           DASHBOARDS_PREFIX:  !Ref DashboardsPrefix
           FOLDER_ID:          !Ref GrafanaFolderId
