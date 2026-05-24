@@ -110,7 +110,6 @@ Resources:
 
   DashboardLoaderFunction:
     Type: AWS::Lambda::Function
-    DependsOn: DashboardsBucket
     Properties:
       FunctionName: !Sub "grafana-dashboard-loader-${GrafanaWorkspaceId}"
       Runtime: python3.12
@@ -286,7 +285,6 @@ Resources:
 
   GrafanaDashboards:
     Type: Custom::GrafanaDashboards
-    DependsOn: DashboardsBucket
     Properties:
       ServiceToken:      !GetAtt DashboardLoaderFunction.Arn
       WorkspaceId:       !Ref GrafanaWorkspaceId
@@ -294,34 +292,3 @@ Resources:
       DashboardsPrefix:  !Ref DashboardsPrefix
       DashboardsVersion: !Ref DashboardsVersion
 
-Outputs:
-
-  DashboardsBucketName:
-    Description: S3 bucket where GitHub Actions uploads dashboard JSON files
-    Value: !Ref DashboardsBucket
-    Export:
-      Name: !Sub "${AWS::StackName}-DashboardsBucketName"
-
-  DashboardsBucketArn:
-    Description: ARN of the dashboards S3 bucket
-    Value: !GetAtt DashboardsBucket.Arn
-    Export:
-      Name: !Sub "${AWS::StackName}-DashboardsBucketArn"
-
-  LambdaFunctionName:
-    Description: Name of the dashboard loader Lambda function
-    Value: !Ref DashboardLoaderFunction
-    Export:
-      Name: !Sub "${AWS::StackName}-LambdaFunctionName"
-
-  LambdaFunctionArn:
-    Description: ARN of the dashboard loader Lambda function
-    Value: !GetAtt DashboardLoaderFunction.Arn
-    Export:
-      Name: !Sub "${AWS::StackName}-LambdaFunctionArn"
-
-  DashboardLoaderRoleArn:
-    Description: IAM role ARN used by the dashboard loader Lambda
-    Value: !GetAtt DashboardLoaderRole.Arn
-    Export:
-      Name: !Sub "${AWS::StackName}-DashboardLoaderRoleArn"
