@@ -34,7 +34,7 @@ concurrency:
 env:
   AWS_REGION: us-east-2
   DASHBOARD_STACK_NAME: grafana-config-${{ github.event.inputs.environment || 'development' }}
-  DASHBOARD_TEMPLATE_FILE: cloudformation/grafana-dashboards.yml
+  DASHBOARD_TEMPLATE_FILE: cloudformation/grafana-dasboards.yml
 
 jobs:
   # ------------------------------------------------------------------
