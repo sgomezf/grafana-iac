@@ -1,0 +1,117 @@
+name: Deploy Grafana Workspace
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "dashboards/*"
+      - ".github/workflows/cfn-load-dashboards.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "development"
+        type: choice
+        options:
+          - development
+          - production
+      action:
+        description: "Stack action"
+        required: true
+        default: "deploy"
+        type: choice
+        options:
+          - deploy
+          - delete
+
+# Prevent concurrent deployments to the same environment
+concurrency:
+  group: grafana-config-${{ github.event.inputs.environment || 'development' }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  DASHBOARD_STACK_NAME: grafana-config-${{ github.event.inputs.environment || 'development' }}
+  DASHBOARD_TEMPLATE_FILE: cloudformation/grafana-dashboards.yml
+
+jobs:
+  # ------------------------------------------------------------------
+  # Validate the CloudFormation template before any deployment attempt
+  # ------------------------------------------------------------------
+  validate:
+    name: Validate Template
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'development' }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate Grafana CloudFormation template
+        run: |
+          aws cloudformation validate-template \
+            --template-body file://${{ env.DASHBOARD_TEMPLATE_FILE }}
+          echo "✅ Template validation passed"
+
+  # ------------------------------------------------------------------
+  # Deploy (create or update) the Gragana CloudFormation stack
+  # ------------------------------------------------------------------
+  deploy-grafana:
+    name: Deploy Grafana Workspace
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event.inputs.action != 'delete'
+
+    environment: ${{ github.event.inputs.environment || 'development' }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy Grafana Configuration stack
+        id: configure-grafana
+        run: |
+          ENV="${{ github.event.inputs.environment || 'development' }}"
+
+          echo "🚀 Deploying stack: ${{ env.DASHBOARD_STACK_NAME }}"
+
+          aws cloudformation deploy \
+            --template-file ${{ env.DASHBOARD_TEMPLATE_FILE }} \
+            --stack-name ${{ env.DASHBOARD_STACK_NAME }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              WorkspaceName="grafana-${ENV}" \
+              WorkspaceEndpoint="https://g-d107f399a5.grafana-workspace.us-east-2.amazonaws.com/" \
+              WorkspaceId="g-d107f399a5" \
+              PluginIds="grafana-redshift-datasource" \
+            --tags \
+              Environment="${ENV}" \
+              ManagedBy="GitHubActions" \
+              Repository="${{ github.repository }}" \
+              Commit="${{ github.sha }}"
+
+          echo "✅ Stack deployment complete"
+
+
+
