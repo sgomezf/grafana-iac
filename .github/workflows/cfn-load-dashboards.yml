@@ -26,7 +26,6 @@ on:
         type: choice
         options:
           - deploy    # Deploy/update stack + load dashboards from repo
-          - delete
 
 concurrency:
   group: grafana-dashboards-${{ github.event.inputs.environment || 'development' }}
@@ -43,7 +42,6 @@ jobs:
   validate:
     name: Validate
     runs-on: ubuntu-latest
-    if: github.event.inputs.action != 'delete'
     permissions:
       contents: read
 
@@ -78,7 +76,6 @@ jobs:
     name: Build Dashboard Payload
     runs-on: ubuntu-latest
     needs: validate
-    if: github.event.inputs.action != 'delete'
     permissions:
       contents: read
     outputs:
@@ -157,7 +154,6 @@ jobs:
     name: Deploy Stack + Load Dashboards
     runs-on: ubuntu-latest
     needs: [validate, build-payload]
-    if: github.event.inputs.action != 'delete'
     environment: ${{ github.event.inputs.environment || 'development' }}
     permissions:
       contents: read
@@ -222,26 +218,3 @@ jobs:
           echo "║  🌐  ${{ secrets.GRAFANA_WORKSPACE_ENDPOINT }}"
           echo "╚══════════════════════════════════════════════════════════════╝"
 
-  delete:
-    name: Delete Stack
-    runs-on: ubuntu-latest
-    if: github.event.inputs.action == 'delete'
-    environment: ${{ github.event.inputs.environment || 'development' }}
-    permissions:
-      contents: read
-
-    steps:
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Delete CloudFormation stack
-        run: |
-          echo "🗑️  Deleting ${{ env.STACK_NAME }}"
-          aws cloudformation delete-stack --stack-name ${{ env.STACK_NAME }}
-          aws cloudformation wait stack-delete-complete \
-            --stack-name ${{ env.STACK_NAME }}
-          echo "✅ Stack deleted"
