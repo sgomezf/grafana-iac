@@ -32,7 +32,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  AWS_REGION: us-east-1
+  AWS_REGION: us-east-2
   STACK_NAME: grafana-dashboard-loader-${{ github.event.inputs.environment || 'development' }}
   TEMPLATE_FILE: cloudformation/grafana-dashboards.yml
   DASHBOARDS_DIR: dashboards
@@ -114,7 +114,7 @@ jobs:
         id: bucket
         run: |
           ENV="${{ github.event.inputs.environment || 'development' }}"
-          BUCKET="grafana-dashboards-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
+          BUCKET="dashboards-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
           echo "name=${BUCKET}" >> $GITHUB_OUTPUT
           echo "🪣 Bucket: ${BUCKET}"
 
@@ -178,7 +178,7 @@ jobs:
         id: bucket
         run: |
           ENV="${{ github.event.inputs.environment || 'development' }}"
-          BUCKET="grafana-dashboards-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
+          BUCKET="dashboards-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
           echo "name=${BUCKET}" >> $GITHUB_OUTPUT
           echo "🪣 Bucket: ${BUCKET}"
 
@@ -231,7 +231,7 @@ jobs:
         id: bucket
         run: |
           ENV="${{ github.event.inputs.environment || 'development' }}"
-          BUCKET="grafana-dashboards-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
+          BUCKET="dashboards-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
           echo "name=${BUCKET}" >> $GITHUB_OUTPUT
           echo "🪣 Bucket: ${BUCKET}"
 
