@@ -92,7 +92,7 @@ Resources:
               - Sid: S3ListBucket
                 Effect: Allow
                 Action: s3:ListBucket
-                Resource: *
+                Resource: "*"
                 Condition:
                   StringLike:
                     s3:prefix: !Sub "${DashboardsPrefix}*"
@@ -100,7 +100,7 @@ Resources:
               - Sid: S3GetDashboards
                 Effect: Allow
                 Action: s3:GetObject
-                Resource: *
+                Resource: "*"
 
       Tags:
         - Key: ManagedBy
