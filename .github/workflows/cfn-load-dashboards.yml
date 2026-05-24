@@ -34,7 +34,7 @@ concurrency:
 env:
   AWS_REGION: us-east-1
   STACK_NAME: grafana-dashboard-loader-${{ github.event.inputs.environment || 'development' }}
-  TEMPLATE_FILE: grafana-dashboard-loader.yml
+  TEMPLATE_FILE: cloudformation/grafana-dashboard-loader.yml
   DASHBOARDS_DIR: dashboards
 
 jobs:
