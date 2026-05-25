@@ -176,6 +176,7 @@ jobs:
   #      alerts/rules/                → s3://bucket/alerts/rules/
   #      alerts/notification-policies/ → s3://bucket/alerts/notification-policies/
   # ------------------------------------------------------------------
+  # ------------------------------------------------------------------
   upload-alerts:
     name: Upload Alerts → S3
     runs-on: ubuntu-latest
@@ -195,18 +196,45 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Resolve bucket name
-        id: bucket
+      # Substitute all placeholders in JSON files before uploading to S3.
+      # Files in the repo use ${PLACEHOLDER} syntax — this step replaces
+      # them with the actual secret values so the Lambda uploads resolved
+      # JSON to Grafana, never the raw placeholders.
+      # Add more sed lines here for any additional secrets/variables.
+      - name: Substitute secrets into alert JSON files
+        env:
+          SNS_TOPIC_ARN: ${{ secrets.SNS_TOPIC_ARN }}
         run: |
-          ENV="${{ github.event.inputs.environment || 'development' }}"
-          BUCKET="grafana-alerts-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
-          echo "name=${BUCKET}" >> $GITHUB_OUTPUT
-          echo "🪣 Bucket: ${BUCKET}"
+          ALERTS_DIR="${{ env.ALERTS_DIR }}"
+          echo "🔐 Substituting secrets into alert JSON files..."
+
+          # Work on a temp copy so the repo working tree stays clean
+          cp -r "$ALERTS_DIR" /tmp/alerts-resolved
+
+          # Replace every placeholder across all JSON files
+          find /tmp/alerts-resolved -name "*.json" | while read f; do
+            sed -i \
+              -e "s|\${SNS_TOPIC_ARN}|${SNS_TOPIC_ARN}|g" \
+              "$f"
+            echo "  ✅ Resolved: $f"
+          done
+
+          # Validate no placeholders remain (catches missing secrets early)
+          UNRESOLVED=$(grep -r '\${' /tmp/alerts-resolved --include="*.json" || true)
+          if [ -n "$UNRESOLVED" ]; then
+            echo ""
+            echo "❌ Unresolved placeholders found — add the missing secrets:"
+            echo "$UNRESOLVED"
+            exit 1
+          fi
+
+          echo "✅ All placeholders resolved"
 
       - name: Sync alert files to S3
         run: |
-          BUCKET="${{ steps.bucket.outputs.name }}"
-          ALERTS_DIR="${{ env.ALERTS_DIR }}"
+          BUCKET="${{ needs.bootstrap-bucket.outputs.bucket_name }}"
+          # Use the resolved copy — not the original repo folder
+          ALERTS_DIR="/tmp/alerts-resolved"
 
           for SUBDIR in contact-points rules notification-policies; do
             LOCAL="${ALERTS_DIR}/${SUBDIR}/"

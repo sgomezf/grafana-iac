@@ -3,7 +3,7 @@
   "name": "ops-sns",
   "type": "sns",
   "settings": {
-    "topic":       "${SNS_TOPIC_ARN}",
+    "topicArn":     "${SNS_TOPIC_ARN}",
     "authProvider": "default",
     "messageFormat": "Json",
     "subject": "[{{ .Status | toUpper }}] EC2 Instance i-0e9c981e03dfb6392 Alert"
