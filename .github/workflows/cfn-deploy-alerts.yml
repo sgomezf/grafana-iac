@@ -48,7 +48,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-
+    environment: ${{ github.event.inputs.environment || 'development' }}
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v4
