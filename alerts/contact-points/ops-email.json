@@ -1,0 +1,10 @@
+{
+  "uid": "ops-email-uid",
+  "name": "ops-email",
+  "type": "email",
+  "settings": {
+    "addresses": "ops@example.com",
+    "subject": "[{{ .Status | toUpper }}] EC2 Instance i-0e9c981e03dfb6392 Alert"
+  },
+  "disableResolveMessage": false
+}

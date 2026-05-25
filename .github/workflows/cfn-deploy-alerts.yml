@@ -1,0 +1,321 @@
+name: Deploy Grafana Alerts
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "cloudformation/grafana-alerts.yml"
+      - "alerts/**"
+      - ".github/workflows/cfn-grafana-alerts.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        default: "development"
+        type: choice
+        options:
+          - development
+          - prod
+      action:
+        description: "Action to run"
+        required: true
+        default: "deploy"
+        type: choice
+        options:
+          - deploy   # Upload alert files to S3 then deploy/update CFN stack
+          - delete
+
+concurrency:
+  group: grafana-alerts-${{ github.event.inputs.environment || 'development' }}
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: us-east-2
+  STACK_NAME: grafana-alerts-${{ github.event.inputs.environment || 'development' }}
+  TEMPLATE_FILE: cloudformation/grafana-alerts.yml
+  ALERTS_DIR: alerts   # repo folder structure:
+                        #   alerts/
+                        #     contact-points/   ← contact point JSON files
+                        #     rules/            ← alert rule group JSON files
+                        #     notification-policies/  ← policy tree JSON file
+
+jobs:
+
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate CloudFormation template
+        run: |
+          aws cloudformation validate-template \
+            --template-body file://${{ env.TEMPLATE_FILE }}
+          echo "✅ Template valid"
+
+      - name: Validate alerts folder structure
+        run: |
+          ERRORS=0
+
+          for SUBDIR in contact-points rules notification-policies; do
+            DIR="${{ env.ALERTS_DIR }}/${SUBDIR}"
+            if [ ! -d "$DIR" ]; then
+              echo "⚠️  Missing folder: ${DIR} (will be skipped)"
+            else
+              COUNT=$(find "$DIR" -name "*.json" | wc -l | tr -d ' ')
+              echo "📁 ${DIR}: ${COUNT} file(s)"
+              find "$DIR" -name "*.json" | sort | sed 's/^/   /'
+
+              # Validate JSON syntax
+              find "$DIR" -name "*.json" | while read f; do
+                python3 -c "import json,sys; json.load(open('$f'))" \
+                  && echo "  ✅ $f" \
+                  || { echo "  ❌ Invalid JSON: $f"; exit 1; }
+              done
+            fi
+          done
+
+          # Validate alert rule groups have required fields
+          if [ -d "${{ env.ALERTS_DIR }}/rules" ]; then
+            echo ""
+            echo "Validating alert rule group fields..."
+            find "${{ env.ALERTS_DIR }}/rules" -name "*.json" | while read f; do
+              python3 << PYEOF
+          import json, sys
+          data = json.load(open("$f"))
+          missing = [k for k in ["name", "folderUID", "rules"] if k not in data]
+          if missing:
+              print(f"  ❌ $f missing fields: {missing}")
+              sys.exit(1)
+          else:
+              print(f"  ✅ $f — name={data['name']}, {len(data['rules'])} rule(s)")
+          PYEOF
+            done
+          fi
+
+          echo ""
+          echo "✅ Validation complete"
+
+  bootstrap-bucket:
+    name: Bootstrap S3 Bucket
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event.inputs.action != 'delete'
+    environment: ${{ github.event.inputs.environment || 'development' }}
+    permissions:
+      contents: read
+    outputs:
+      bucket_name: ${{ steps.bucket.outputs.name }}
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve bucket name
+        id: bucket
+        run: |
+          ENV="${{ github.event.inputs.environment || 'development' }}"
+          BUCKET="grafana-alerts-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
+          echo "name=${BUCKET}" >> $GITHUB_OUTPUT
+          echo "🪣 Bucket: ${BUCKET}"
+
+      - name: Ensure S3 bucket exists
+        run: |
+          BUCKET="${{ steps.bucket.outputs.name }}"
+
+          if aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
+            echo "✅ Bucket already exists"
+          else
+            echo "🪣 Creating bucket: ${BUCKET}"
+            if [ "${{ env.AWS_REGION }}" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "${BUCKET}"
+            else
+              aws s3api create-bucket --bucket "${BUCKET}" \
+                --create-bucket-configuration LocationConstraint=${{ env.AWS_REGION }}
+            fi
+
+            aws s3api put-bucket-versioning \
+              --bucket "${BUCKET}" \
+              --versioning-configuration Status=Enabled
+
+            aws s3api put-bucket-encryption \
+              --bucket "${BUCKET}" \
+              --server-side-encryption-configuration \
+                '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
+
+            aws s3api put-public-access-block \
+              --bucket "${BUCKET}" \
+              --public-access-block-configuration \
+                "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+
+            echo "✅ Bucket created: ${BUCKET}"
+          fi
+
+  # ------------------------------------------------------------------
+  # Upload alerts — sync all alert subfolders to S3.
+  #    Each subfolder maps to a different S3 prefix:
+  #      alerts/contact-points/       → s3://bucket/alerts/contact-points/
+  #      alerts/rules/                → s3://bucket/alerts/rules/
+  #      alerts/notification-policies/ → s3://bucket/alerts/notification-policies/
+  # ------------------------------------------------------------------
+  upload-alerts:
+    name: Upload Alerts → S3
+    runs-on: ubuntu-latest
+    needs: bootstrap-bucket
+    environment: ${{ github.event.inputs.environment || 'development' }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve bucket name
+        id: bucket
+        run: |
+          ENV="${{ github.event.inputs.environment || 'development' }}"
+          BUCKET="grafana-alerts-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
+          echo "name=${BUCKET}" >> $GITHUB_OUTPUT
+          echo "🪣 Bucket: ${BUCKET}"
+
+      - name: Sync alert files to S3
+        run: |
+          BUCKET="${{ steps.bucket.outputs.name }}"
+          ALERTS_DIR="${{ env.ALERTS_DIR }}"
+
+          for SUBDIR in contact-points rules notification-policies; do
+            LOCAL="${ALERTS_DIR}/${SUBDIR}/"
+            S3_PATH="s3://${BUCKET}/alerts/${SUBDIR}/"
+
+            if [ ! -d "$LOCAL" ]; then
+              echo "⏭️  Skipping ${SUBDIR} — folder not found"
+              continue
+            fi
+
+            COUNT=$(find "$LOCAL" -name "*.json" | wc -l | tr -d ' ')
+            echo "⬆️  Syncing ${COUNT} file(s): ${LOCAL} → ${S3_PATH}"
+
+            aws s3 sync "$LOCAL" "$S3_PATH" \
+              --include "*.json" \
+              --delete \
+              --content-type "application/json"
+
+            echo "  ✅ ${SUBDIR} synced"
+          done
+
+          echo ""
+          echo "✅ All alert files uploaded to S3"
+
+  # ------------------------------------------------------------------
+  # 4. Deploy/update the CFN stack.
+  #    Runs AFTER upload so all files are in S3 when Lambda runs.
+  #    Bumps AlertsVersion to guarantee Lambda is re-invoked.
+  # ------------------------------------------------------------------
+  deploy:
+    name: Deploy CFN Stack
+    runs-on: ubuntu-latest
+    needs: [bootstrap-bucket, upload-alerts]
+    environment: ${{ github.event.inputs.environment || 'development' }}
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve next AlertsVersion
+        id: version
+        run: |
+          CURRENT=$(aws cloudformation describe-stacks \
+            --stack-name ${{ env.STACK_NAME }} \
+            --query "Stacks[0].Parameters[?ParameterKey=='AlertsVersion'].ParameterValue" \
+            --output text 2>/dev/null || echo "0")
+          NEW=$((CURRENT + 1))
+          echo "version=${NEW}" >> $GITHUB_OUTPUT
+          echo "🔢 AlertsVersion: ${CURRENT} → ${NEW}"
+
+      - name: Resolve bucket name
+        id: bucket
+        run: |
+          ENV="${{ github.event.inputs.environment || 'development' }}"
+          BUCKET="grafana-alerts-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
+          echo "name=${BUCKET}" >> $GITHUB_OUTPUT
+          echo "🪣 Bucket: ${BUCKET}"
+
+      - name: Deploy CloudFormation stack
+        run: |
+          ENV="${{ github.event.inputs.environment || 'development' }}"
+          BUCKET="${{ steps.bucket.outputs.name }}"
+
+          echo "🚀 Deploying ${{ env.STACK_NAME }}"
+
+          aws cloudformation deploy \
+            --template-file ${{ env.TEMPLATE_FILE }} \
+            --stack-name ${{ env.STACK_NAME }} \
+            --capabilities CAPABILITY_NAMED_IAM \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              GrafanaWorkspaceId="${{ secrets.GRAFANA_WORKSPACE_ID }}" \
+              GrafanaWorkspaceEndpoint="${{ secrets.GRAFANA_WORKSPACE_ENDPOINT }}" \
+              GrafanaServiceAccountTokenSSMPath="${{ secrets.GRAFANA_API_KEY_SSM_PATH }}" \
+              AlertsBucketName="${BUCKET}" \
+              AlertRulesPrefix="alerts/rules/" \
+              ContactPointsPrefix="alerts/contact-points/" \
+              NotificationPoliciesPrefix="alerts/notification-policies/" \
+              AlertsVersion="${{ steps.version.outputs.version }}" \
+            --tags \
+              Environment="${ENV}" \
+              ManagedBy="GitHubActions" \
+              Repository="${{ github.repository }}" \
+              Commit="${{ github.sha }}"
+
+          echo "✅ Stack deployed"
+
+      - name: Print summary
+        run: |
+          BUCKET="${{ steps.bucket.outputs.name }}"
+          CP_COUNT=$(aws s3 ls s3://${BUCKET}/alerts/contact-points/ 2>/dev/null | grep -c '\.json' || true)
+          NP_COUNT=$(aws s3 ls s3://${BUCKET}/alerts/notification-policies/ 2>/dev/null | grep -c '\.json' || true)
+          RU_COUNT=$(aws s3 ls s3://${BUCKET}/alerts/rules/ 2>/dev/null | grep -c '\.json' || true)
+
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════════╗"
+          echo "║  ✅  Grafana alerts deployed successfully                    ║"
+          echo "╠══════════════════════════════════════════════════════════════╣"
+          echo "║  📬  ${CP_COUNT} contact point(s)"
+          echo "║  🗺️   ${NP_COUNT} notification polic(ies)"
+          echo "║  🔔  ${RU_COUNT} alert rule group(s)"
+          echo "║  🌐  ${{ secrets.GRAFANA_WORKSPACE_ENDPOINT }}"
+          echo "╚══════════════════════════════════════════════════════════════╝"
+

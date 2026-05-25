@@ -1,0 +1,640 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Standalone stack that deploys Grafana Unified Alerting rules and custom
+  contact points (notification channels) into an existing Amazon Managed
+  Grafana workspace via Lambda-backed CloudFormation custom resources.
+  Compatible with Grafana 12.x — authenticates using a Service Account Token.
+  Alert rules and contact points are loaded from an S3 bucket uploaded by
+  GitHub Actions.
+
+Parameters:
+
+  GrafanaWorkspaceId:
+    Type: String
+    Description: ID of the existing AMG workspace (e.g. g-abc1234567).
+
+  GrafanaWorkspaceEndpoint:
+    Type: String
+    Description: >
+      Full HTTPS endpoint of the Grafana workspace
+      (e.g. https://abc1234567.grafana-workspace.us-east-1.amazonaws.com).
+
+  GrafanaServiceAccountTokenSSMPath:
+    Type: String
+    Description: >
+      SSM path holding the Grafana Service Account Token with Admin role
+      (e.g. /grafana/my-workspace/admin-api-key).
+
+  AlertsBucketName:
+    Type: String
+    Description: >
+      Name of the S3 bucket where GitHub Actions uploads alert rule and
+      contact point JSON files. Created by this stack.
+
+  AlertRulesPrefix:
+    Type: String
+    Default: "alerts/rules/"
+    Description: >
+      S3 key prefix for alert rule group JSON files. Must end with /.
+
+  ContactPointsPrefix:
+    Type: String
+    Default: "alerts/contact-points/"
+    Description: >
+      S3 key prefix for contact point JSON files. Must end with /.
+
+  NotificationPoliciesPrefix:
+    Type: String
+    Default: "alerts/notification-policies/"
+    Description: >
+      S3 key prefix for notification policy JSON files. Must end with /.
+
+  AlertsVersion:
+    Type: String
+    Default: "1"
+    Description: >
+      Bumped by GitHub Actions after every S3 sync to force CloudFormation
+      to re-invoke the Lambda and reload alerts into Grafana.
+
+Resources:
+
+  # IAM Role — Lambda execution role
+  AlertsLoaderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "grafana-alerts-loader-${GrafanaWorkspaceId}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: AlertsLoaderPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+
+              - Sid: SSMGetToken
+                Effect: Allow
+                Action: ssm:GetParameter
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${GrafanaServiceAccountTokenSSMPath}"
+
+              - Sid: KMSDecryptSSM
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub "ssm.${AWS::Region}.amazonaws.com"
+
+              - Sid: S3ListBucket
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: "*"
+
+              - Sid: S3GetAlertFiles
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: "*"
+
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ---------------------------------------------------------------
+  # Lambda Function — Contact points loader
+  #
+  #  Reads .json files from ContactPointsPrefix in S3.
+  #  Each file must be a single Grafana contact point object, e.g.:
+  #
+  #    {
+  #      "name": "ops-email",
+  #      "type": "email",
+  #      "settings": { "addresses": "ops@example.com" },
+  #      "disableResolveMessage": false
+  #    }
+  #
+  #  Supported types: email, slack, pagerduty, sns, webhook, opsgenie
+  #
+  #  Create/Update → upsert each contact point via
+  #                  POST /api/v1/provisioning/contact-points
+  #  Delete        → DELETE /api/v1/provisioning/contact-points/{uid}
+  # ---------------------------------------------------------------
+  ContactPointsLoaderFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "grafana-contact-points-${GrafanaWorkspaceId}"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt AlertsLoaderRole.Arn
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          WORKSPACE_ENDPOINT: !Ref GrafanaWorkspaceEndpoint
+          SSM_TOKEN_PATH:     !Ref GrafanaServiceAccountTokenSSMPath
+          BUCKET_NAME:        !Ref AlertsBucketName
+          CP_PREFIX:          !Ref ContactPointsPrefix
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import urllib.request
+          import urllib.error
+          import boto3
+          import cfnresponse
+
+          s3       = boto3.client("s3")
+          ssm      = boto3.client("ssm")
+          ENDPOINT = os.environ["WORKSPACE_ENDPOINT"].rstrip("/")
+          BUCKET   = os.environ["BUCKET_NAME"]
+          CP_PREFIX = os.environ["CP_PREFIX"]
+
+          def get_token():
+              resp = ssm.get_parameter(
+                  Name=os.environ["SSM_TOKEN_PATH"], WithDecryption=True)
+              return resp["Parameter"]["Value"]
+
+          def grafana(method, path, token, body=None):
+              data = json.dumps(body).encode() if body else None
+              req  = urllib.request.Request(
+                  ENDPOINT + path, data=data, method=method,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Content-Type":  "application/json",
+                      "Accept":        "application/json",
+                      # Required for provisioning API writes
+                      "X-Disable-Provenance": "true",
+                  })
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      raw = r.read()
+                      return r.status, json.loads(raw) if raw else {}
+              except urllib.error.HTTPError as e:
+                  raw = e.read()
+                  return e.code, json.loads(raw) if raw else {}
+
+          def list_keys(prefix):
+              paginator = s3.get_paginator("list_objects_v2")
+              keys = []
+              for page in paginator.paginate(Bucket=BUCKET, Prefix=prefix):
+                  for obj in page.get("Contents", []):
+                      if obj["Key"].endswith(".json"):
+                          keys.append(obj["Key"])
+              print(f"Found {len(keys)} file(s) under s3://{BUCKET}/{prefix}")
+              return keys
+
+          def fetch_json(key):
+              resp = s3.get_object(Bucket=BUCKET, Key=key)
+              return json.loads(resp["Body"].read())
+
+          def upsert_contact_point(key, token):
+              """
+              POST creates a new contact point.
+              If uid already exists, DELETE then re-POST (upsert pattern).
+              """
+              filename = key.split("/")[-1]
+              cp       = fetch_json(key)
+              uid      = cp.get("uid")
+
+              # Try to delete existing one first for clean upsert
+              if uid:
+                  grafana("DELETE",
+                      f"/api/v1/provisioning/contact-points/{uid}", token)
+
+              status, body = grafana(
+                  "POST", "/api/v1/provisioning/contact-points", token, cp)
+              success = status in (200, 201, 202)
+              print(f"  {'OK' if success else 'FAIL'} [{status}] {filename}: {body}")
+              return success, body.get("uid", uid), f"HTTP {status}"
+
+          def delete_contact_point(key, token):
+              filename = key.split("/")[-1]
+              try:
+                  cp  = fetch_json(key)
+                  uid = cp.get("uid")
+                  if not uid:
+                      print(f"  SKIP {filename} — no uid")
+                      return
+                  status, _ = grafana(
+                      "DELETE",
+                      f"/api/v1/provisioning/contact-points/{uid}", token)
+                  print(f"  DELETE {filename} uid={uid} → HTTP {status}")
+              except Exception as e:
+                  print(f"  WARNING: {filename}: {e}")
+
+          def handler(event, context):
+              print("RequestType:", event["RequestType"])
+              physical_id  = event.get("PhysicalResourceId", "grafana-contact-points")
+              request_type = event["RequestType"]
+
+              try:
+                  token = get_token()
+                  keys  = list_keys(CP_PREFIX)
+              except Exception as exc:
+                  cfnresponse.send(event, context, cfnresponse.FAILED,
+                      {"Message": str(exc)}, physical_id)
+                  return
+
+              if request_type in ("Create", "Update"):
+                  if not keys:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                          {"Message": "No contact point files found"}, physical_id)
+                      return
+
+                  errors = []
+                  uids   = []
+                  for key in keys:
+                      try:
+                          ok, uid, msg = upsert_contact_point(key, token)
+                          (uids if ok else errors).append(
+                              {"file": key.split("/")[-1], "uid": uid, "result": msg})
+                      except Exception as exc:
+                          errors.append({"file": key, "error": str(exc)})
+
+                  if errors:
+                      cfnresponse.send(event, context, cfnresponse.FAILED,
+                          {"Errors": errors}, physical_id)
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                          {"ContactPoints": uids}, physical_id)
+
+              elif request_type == "Delete":
+                  for key in keys:
+                      delete_contact_point(key, token)
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                      {"Message": "Contact points removed (best-effort)"}, physical_id)
+
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ---------------------------------------------------------------
+  # 4. LAMBDA — Notification policies loader
+  #
+  #  Reads a single policy-tree JSON from NotificationPoliciesPrefix.
+  #  Grafana has ONE notification policy tree — this Lambda replaces
+  #  it entirely via PUT /api/v1/provisioning/policies.
+  #
+  #  File format (notification-policy.json):
+  #    {
+  #      "receiver": "ops-email",
+  #      "group_by": ["alertname", "namespace"],
+  #      "routes": [
+  #        {
+  #          "receiver": "pagerduty",
+  #          "matchers": ["severity=critical"],
+  #          "continue": false
+  #        }
+  #      ]
+  #    }
+  # ---------------------------------------------------------------
+  NotificationPoliciesLoaderFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "grafana-notif-policies-${GrafanaWorkspaceId}"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt AlertsLoaderRole.Arn
+      Timeout: 120
+      MemorySize: 256
+      Environment:
+        Variables:
+          WORKSPACE_ENDPOINT: !Ref GrafanaWorkspaceEndpoint
+          SSM_TOKEN_PATH:     !Ref GrafanaServiceAccountTokenSSMPath
+          BUCKET_NAME:        !Ref AlertsBucketName
+          NP_PREFIX:          !Ref NotificationPoliciesPrefix
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import urllib.request
+          import urllib.error
+          import boto3
+          import cfnresponse
+
+          s3        = boto3.client("s3")
+          ssm       = boto3.client("ssm")
+          ENDPOINT  = os.environ["WORKSPACE_ENDPOINT"].rstrip("/")
+          BUCKET    = os.environ["BUCKET_NAME"]
+          NP_PREFIX = os.environ["NP_PREFIX"]
+
+          def get_token():
+              resp = ssm.get_parameter(
+                  Name=os.environ["SSM_TOKEN_PATH"], WithDecryption=True)
+              return resp["Parameter"]["Value"]
+
+          def grafana(method, path, token, body=None):
+              data = json.dumps(body).encode() if body else None
+              req  = urllib.request.Request(
+                  ENDPOINT + path, data=data, method=method,
+                  headers={
+                      "Authorization":       f"Bearer {token}",
+                      "Content-Type":        "application/json",
+                      "Accept":              "application/json",
+                      "X-Disable-Provenance": "true",
+                  })
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      raw = r.read()
+                      return r.status, json.loads(raw) if raw else {}
+              except urllib.error.HTTPError as e:
+                  raw = e.read()
+                  return e.code, json.loads(raw) if raw else {}
+
+          def list_keys():
+              paginator = s3.get_paginator("list_objects_v2")
+              keys = []
+              for page in paginator.paginate(Bucket=BUCKET, Prefix=NP_PREFIX):
+                  for obj in page.get("Contents", []):
+                      if obj["Key"].endswith(".json"):
+                          keys.append(obj["Key"])
+              return keys
+
+          def fetch_json(key):
+              resp = s3.get_object(Bucket=BUCKET, Key=key)
+              return json.loads(resp["Body"].read())
+
+          def handler(event, context):
+              print("RequestType:", event["RequestType"])
+              physical_id  = event.get("PhysicalResourceId", "grafana-notif-policies")
+              request_type = event["RequestType"]
+
+              try:
+                  token = get_token()
+              except Exception as exc:
+                  cfnresponse.send(event, context, cfnresponse.FAILED,
+                      {"Message": str(exc)}, physical_id)
+                  return
+
+              if request_type in ("Create", "Update"):
+                  keys = list_keys()
+                  if not keys:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                          {"Message": "No notification policy files found"}, physical_id)
+                      return
+
+                  # Use the first file — Grafana has a single policy tree
+                  key    = keys[0]
+                  policy = fetch_json(key)
+                  print(f"Applying notification policy from: {key}")
+
+                  status, body = grafana(
+                      "PUT", "/api/v1/provisioning/policies", token, policy)
+                  success = status in (200, 201, 202, 204)
+                  print(f"  {'OK' if success else 'FAIL'} [{status}]: {body}")
+
+                  if success:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                          {"Message": f"Policy applied from {key.split('/')[-1]}"},
+                          physical_id)
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.FAILED,
+                          {"Message": f"HTTP {status}: {body}"}, physical_id)
+
+              elif request_type == "Delete":
+                  # Reset to default policy (empty routes, default receiver)
+                  default_policy = {
+                      "receiver":  "grafana-default-email",
+                      "group_by":  ["grafana_folder", "alertname"],
+                      "routes":    [],
+                  }
+                  try:
+                      grafana("PUT", "/api/v1/provisioning/policies", token, default_policy)
+                      print("Notification policy reset to default")
+                  except Exception as e:
+                      print(f"Warning resetting policy: {e}")
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                      {"Message": "Policy reset to default"}, physical_id)
+
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ---------------------------------------------------------------
+  # 5. LAMBDA — Alert rules loader
+  #
+  #  Reads .json files from AlertRulesPrefix in S3.
+  #  Each file must be a Grafana alert rule group object, e.g.:
+  #
+  #    {
+  #      "name": "cpu-alerts",
+  #      "folderUID": "my-folder-uid",
+  #      "interval": 60,
+  #      "rules": [
+  #        {
+  #          "title": "High CPU",
+  #          "condition": "C",
+  #          "data": [...],
+  #          "noDataState": "NoData",
+  #          "execErrState": "Error",
+  #          "for": "5m",
+  #          "labels": { "severity": "critical" },
+  #          "annotations": { "summary": "CPU > 90%" }
+  #        }
+  #      ]
+  #    }
+  #
+  #  Create/Update → PUT /api/v1/provisioning/alert-rules/group
+  #  Delete        → DELETE each rule by uid (best-effort)
+  # ---------------------------------------------------------------
+  AlertRulesLoaderFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub "grafana-alert-rules-${GrafanaWorkspaceId}"
+      Runtime: python3.12
+      Handler: index.handler
+      Role: !GetAtt AlertsLoaderRole.Arn
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          WORKSPACE_ENDPOINT: !Ref GrafanaWorkspaceEndpoint
+          SSM_TOKEN_PATH:     !Ref GrafanaServiceAccountTokenSSMPath
+          BUCKET_NAME:        !Ref AlertsBucketName
+          RULES_PREFIX:       !Ref AlertRulesPrefix
+      Code:
+        ZipFile: |
+          import json
+          import os
+          import urllib.request
+          import urllib.error
+          import boto3
+          import cfnresponse
+
+          s3           = boto3.client("s3")
+          ssm          = boto3.client("ssm")
+          ENDPOINT     = os.environ["WORKSPACE_ENDPOINT"].rstrip("/")
+          BUCKET       = os.environ["BUCKET_NAME"]
+          RULES_PREFIX = os.environ["RULES_PREFIX"]
+
+          def get_token():
+              resp = ssm.get_parameter(
+                  Name=os.environ["SSM_TOKEN_PATH"], WithDecryption=True)
+              return resp["Parameter"]["Value"]
+
+          def grafana(method, path, token, body=None):
+              data = json.dumps(body).encode() if body else None
+              req  = urllib.request.Request(
+                  ENDPOINT + path, data=data, method=method,
+                  headers={
+                      "Authorization":       f"Bearer {token}",
+                      "Content-Type":        "application/json",
+                      "Accept":              "application/json",
+                      "X-Disable-Provenance": "true",
+                  })
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      raw = r.read()
+                      return r.status, json.loads(raw) if raw else {}
+              except urllib.error.HTTPError as e:
+                  raw = e.read()
+                  return e.code, json.loads(raw) if raw else {}
+
+          def list_keys():
+              paginator = s3.get_paginator("list_objects_v2")
+              keys = []
+              for page in paginator.paginate(Bucket=BUCKET, Prefix=RULES_PREFIX):
+                  for obj in page.get("Contents", []):
+                      if obj["Key"].endswith(".json"):
+                          keys.append(obj["Key"])
+              print(f"Found {len(keys)} rule group file(s)")
+              return keys
+
+          def fetch_json(key):
+              resp = s3.get_object(Bucket=BUCKET, Key=key)
+              return json.loads(resp["Body"].read())
+
+          def upsert_rule_group(key, token):
+              """
+              PUT /api/v1/provisioning/folder/{folderUID}/rule-groups/{group}
+              Creates or fully replaces the rule group.
+              """
+              filename   = key.split("/")[-1]
+              group      = fetch_json(key)
+              folder_uid = group.get("folderUID", "")
+              group_name = group.get("name", "")
+
+              if not folder_uid or not group_name:
+                  raise ValueError(
+                      f"{filename}: missing required fields 'folderUID' and/or 'name'")
+
+              path   = f"/api/v1/provisioning/folder/{folder_uid}/rule-groups/{group_name}"
+              status, body = grafana("PUT", path, token, group)
+              success = status in (200, 201, 202)
+              print(f"  {'OK' if success else 'FAIL'} [{status}] {filename}: {body}")
+              return success, f"HTTP {status}"
+
+          def delete_rule_group(key, token):
+              """DELETE a rule group by folderUID + group name."""
+              filename = key.split("/")[-1]
+              try:
+                  group      = fetch_json(key)
+                  folder_uid = group.get("folderUID", "")
+                  group_name = group.get("name", "")
+                  if not folder_uid or not group_name:
+                      print(f"  SKIP {filename} — missing folderUID or name")
+                      return
+                  path = f"/api/v1/provisioning/folder/{folder_uid}/rule-groups/{group_name}"
+                  status, _ = grafana("DELETE", path, token)
+                  print(f"  DELETE {filename} → HTTP {status}")
+              except Exception as e:
+                  print(f"  WARNING: {filename}: {e}")
+
+          def handler(event, context):
+              print("RequestType:", event["RequestType"])
+              physical_id  = event.get("PhysicalResourceId", "grafana-alert-rules")
+              request_type = event["RequestType"]
+
+              try:
+                  token = get_token()
+                  keys  = list_keys()
+              except Exception as exc:
+                  cfnresponse.send(event, context, cfnresponse.FAILED,
+                      {"Message": str(exc)}, physical_id)
+                  return
+
+              if request_type in ("Create", "Update"):
+                  if not keys:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                          {"Message": "No alert rule files found"}, physical_id)
+                      return
+
+                  errors  = []
+                  results = []
+                  for key in keys:
+                      try:
+                          ok, msg = upsert_rule_group(key, token)
+                          (results if ok else errors).append(
+                              {"file": key.split("/")[-1], "result": msg})
+                      except Exception as exc:
+                          errors.append({"file": key, "error": str(exc)})
+
+                  if errors:
+                      cfnresponse.send(event, context, cfnresponse.FAILED,
+                          {"Errors": errors}, physical_id)
+                  else:
+                      cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                          {"RuleGroups": results}, physical_id)
+
+              elif request_type == "Delete":
+                  for key in keys:
+                      delete_rule_group(key, token)
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS,
+                      {"Message": "Alert rules removed (best-effort)"}, physical_id)
+
+      Tags:
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  # ---------------------------------------------------------------
+  # 6. CUSTOM RESOURCES — trigger each Lambda.
+  #    Order: contact points first (rules reference them via labels),
+  #    then policies, then alert rules.
+  # ---------------------------------------------------------------
+  GrafanaContactPoints:
+    Type: Custom::GrafanaContactPoints
+    Properties:
+      ServiceToken:  !GetAtt ContactPointsLoaderFunction.Arn
+      WorkspaceId:   !Ref GrafanaWorkspaceId
+      AlertsVersion: !Ref AlertsVersion
+
+  GrafanaNotificationPolicies:
+    Type: Custom::GrafanaNotificationPolicies
+    DependsOn: GrafanaContactPoints
+    Properties:
+      ServiceToken:  !GetAtt NotificationPoliciesLoaderFunction.Arn
+      WorkspaceId:   !Ref GrafanaWorkspaceId
+      AlertsVersion: !Ref AlertsVersion
+
+  GrafanaAlertRules:
+    Type: Custom::GrafanaAlertRules
+    DependsOn: GrafanaNotificationPolicies
+    Properties:
+      ServiceToken:  !GetAtt AlertRulesLoaderFunction.Arn
+      WorkspaceId:   !Ref GrafanaWorkspaceId
+      AlertsVersion: !Ref AlertsVersion
+
+Outputs:
+
+  ContactPointsLoaderArn:
+    Description: ARN of the contact points loader Lambda
+    Value: !GetAtt ContactPointsLoaderFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ContactPointsLoaderArn"
+
+  NotificationPoliciesLoaderArn:
+    Description: ARN of the notification policies loader Lambda
+    Value: !GetAtt NotificationPoliciesLoaderFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-NotificationPoliciesLoaderArn"
+
+  AlertRulesLoaderArn:
+    Description: ARN of the alert rules loader Lambda
+    Value: !GetAtt AlertRulesLoaderFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-AlertRulesLoaderArn"
