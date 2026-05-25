@@ -216,6 +216,7 @@ jobs:
           find /tmp/alerts-resolved -name "*.json" | while read f; do
             sed -i \
               -e "s|\${SNS_TOPIC_ARN}|${SNS_TOPIC_ARN}|g" \
+              -e "s|\${CLOUDWATCH_DATASOURCE_UID}|${CLOUDWATCH_DATASOURCE_UID}|g" \
               "$f"
             echo "  ✅ Resolved: $f"
           done
