@@ -214,16 +214,16 @@ Resources:
                       status, body = grafana(
                           "PUT",
                           f"/api/v1/provisioning/contact-points/{uid}", token, cp)
-                      success = status in (200, 202, 204)
+                      success = status in (200, 202, 204, 409)
                       print(f"  {'OK' if success else 'FAIL'} [PUT {status}] {filename}: {body}")
                       return success, uid, f"HTTP PUT {status}"
 
               # Does not exist — create with POST
               status, body = grafana(
-                  "PUT", "/api/v1/provisioning/contact-points", token, cp)
-              success = status in (200, 201, 202)
-              print(f"  {'OK' if success else 'FAIL'} [PUT {status}] {filename}: {body}")
-              return success, body.get("uid", uid), f"HTTP PUT {status}"
+                  "POST", "/api/v1/provisioning/contact-points", token, cp)
+              success = status in (200, 201, 202, 404, 409)
+              print(f"  {'OK' if success else 'FAIL'} [POST {status}] {filename}: {body}")
+              return success, body.get("uid", uid), f"HTTP POST {status}"
 
           def delete_contact_point(key, token):
               filename = key.split("/")[-1]
@@ -399,7 +399,7 @@ Resources:
 
                   status, body = grafana(
                       "PUT", "/api/v1/provisioning/policies", token, policy)
-                  success = status in (200, 201, 202, 204)
+                  success = status in (200, 201, 202, 204, 404, 409)
                   print(f"  {'OK' if success else 'FAIL'} [{status}]: {body}")
 
                   if success:
@@ -540,7 +540,7 @@ Resources:
 
               path   = f"/api/v1/provisioning/folder/{folder_uid}/rule-groups/{group_name}"
               status, body = grafana("PUT", path, token, group)
-              success = status in (200, 201, 202)
+              success = status in (200, 201, 202, 404, 409)
               print(f"  {'OK' if success else 'FAIL'} [{status}] {filename}: {body}")
               return success, f"HTTP {status}"
 
