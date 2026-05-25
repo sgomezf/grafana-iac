@@ -3,10 +3,10 @@
   "name": "ops-sns",
   "type": "sns",
   "settings": {
-    "topicArn":     "${SNS_TOPIC_ARN}",
     "authProvider": "default",
-    "messageFormat": "Json",
-    "subject": "[{{ .Status | toUpper }}] EC2 Instance i-0e9c981e03dfb6392 Alert"
+    "topicArn": "${SNS_TOPIC_ARN}",
+    "messageFormat": "json",
+    "subject": "[{{ .Status | toUpper }}] EC2 i-0e9c981e03dfb6392 Alert"
   },
   "disableResolveMessage": false
 }
