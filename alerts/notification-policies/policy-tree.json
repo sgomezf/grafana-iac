@@ -1,12 +1,12 @@
 {
-  "receiver": "ops-email",
+  "receiver": "ops-sns",
   "group_by": ["alertname", "instance_id"],
   "group_wait": "30s",
   "group_interval": "5m",
   "repeat_interval": "1h",
   "routes": [
     {
-      "receiver": "ops-email",
+      "receiver": "ops-sns",
       "matchers": ["instance_id = i-0e9c981e03dfb6392"],
       "group_by": ["alertname", "instance_id"],
       "continue": false

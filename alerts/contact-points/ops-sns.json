@@ -1,0 +1,12 @@
+{
+  "uid": "ops-sns-uid",
+  "name": "ops-sns",
+  "type": "sns",
+  "settings": {
+    "topic":       "${SNS_TOPIC_ARN}",
+    "authProvider": "default",
+    "messageFormat": "Json",
+    "subject": "[{{ .Status | toUpper }}] EC2 Instance i-0e9c981e03dfb6392 Alert"
+  },
+  "disableResolveMessage": false
+}
