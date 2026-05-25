@@ -196,6 +196,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Resolve bucket name
+        id: bucket
+        run: |
+          ENV="${{ github.event.inputs.environment || 'development' }}"
+          BUCKET="grafana-alerts-${ENV}-${{ secrets.AWS_ACCOUNT_ID }}"
+          echo "name=${BUCKET}" >> $GITHUB_OUTPUT
+          echo "🪣 Bucket: ${BUCKET}"          
+
       # Substitute all placeholders in JSON files before uploading to S3.
       # Files in the repo use ${PLACEHOLDER} syntax — this step replaces
       # them with the actual secret values so the Lambda uploads resolved
@@ -234,7 +242,7 @@ jobs:
 
       - name: Sync alert files to S3
         run: |
-          BUCKET="${{ needs.bootstrap-bucket.outputs.bucket_name }}"
+          BUCKET="${{ steps.bucket.outputs.name }}"
           # Use the resolved copy — not the original repo folder
           ALERTS_DIR="/tmp/alerts-resolved"
 
