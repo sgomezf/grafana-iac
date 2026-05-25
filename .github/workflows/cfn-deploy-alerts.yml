@@ -7,7 +7,7 @@ on:
     paths:
       - "cloudformation/grafana-alerts.yml"
       - "alerts/**"
-      - ".github/workflows/cfn-grafana-alerts.yml"
+      - ".github/workflows/cfn-deploy-alerts.yml"
   workflow_dispatch:
     inputs:
       environment:
