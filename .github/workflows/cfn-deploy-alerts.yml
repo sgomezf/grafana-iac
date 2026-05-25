@@ -212,7 +212,7 @@ jobs:
       - name: Substitute secrets into alert JSON files
         env:
           SNS_TOPIC_ARN: ${{ secrets.SNS_TOPIC_ARN }}
-          CLOUDWATCH_DATASOURCE_UID: "cloudwatch"
+          CLOUDWATCH_DATASOURCE_UID: ${{ secrets.CLOUDWATCH_DATASOURCE_UID }}
         run: |
           ALERTS_DIR="${{ env.ALERTS_DIR }}"
           echo "🔐 Substituting secrets into alert JSON files..."
@@ -220,25 +220,28 @@ jobs:
           # Work on a temp copy so the repo working tree stays clean
           cp -r "$ALERTS_DIR" /tmp/alerts-resolved
 
-          # Replace every placeholder across all JSON files
+          # envsubst replaces ${VAR_NAME} with the value of the shell
+          # env var VAR_NAME. We explicitly list which vars to substitute
+          # so it doesn't accidentally touch any other ${...} patterns
+          # in the JSON (e.g. Grafana template variables).
+          VARS_TO_SUBSTITUTE='${SNS_TOPIC_ARN} ${CLOUDWATCH_DATASOURCE_UID}'
+
           find /tmp/alerts-resolved -name "*.json" | while read f; do
-            sed -i \
-              -e "s|\${SNS_TOPIC_ARN}|${SNS_TOPIC_ARN}|g" \
-              -e "s|\${CLOUDWATCH_DATASOURCE_UID}|${CLOUDWATCH_DATASOURCE_UID}|g" \
-              "$f"
-            echo "  ✅ Resolved: $f"
+            envsubst "$VARS_TO_SUBSTITUTE" < "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+            echo "  ✅ Resolved: $(basename $f)"
           done
 
-          # Validate no placeholders remain (catches missing secrets early)
-          UNRESOLVED=$(grep -r '\${' /tmp/alerts-resolved --include="*.json" || true)
+          # Validate no placeholders remain — catches missing secrets early
+          UNRESOLVED=$(grep -rn '\${SNS_TOPIC_ARN}' /tmp/alerts-resolved --include="*.json" || true)
           if [ -n "$UNRESOLVED" ]; then
             echo ""
-            echo "❌ Unresolved placeholders found — add the missing secrets:"
+            echo "❌ SNS_TOPIC_ARN was not substituted — check the secret is set in GitHub:"
             echo "$UNRESOLVED"
             exit 1
           fi
 
           echo "✅ All placeholders resolved"
+
 
       - name: Sync alert files to S3
         run: |
