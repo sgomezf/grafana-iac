@@ -1,6 +1,6 @@
 {
   "name": "ec2-instance-down",
-  "folderUID": "",
+  "folder": "ec2-alerts",
   "interval": 60,
   "rules": [
     {
