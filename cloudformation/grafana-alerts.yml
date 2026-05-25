@@ -153,7 +153,6 @@ Resources:
           ENDPOINT = os.environ["WORKSPACE_ENDPOINT"].rstrip("/")
           BUCKET   = os.environ["BUCKET_NAME"]
           CP_PREFIX = os.environ["CP_PREFIX"]
-
           def get_token():
               resp = ssm.get_parameter(
                   Name=os.environ["SSM_TOKEN_PATH"], WithDecryption=True)
@@ -194,23 +193,37 @@ Resources:
 
           def upsert_contact_point(key, token):
               """
-              POST creates a new contact point.
-              If uid already exists, DELETE then re-POST (upsert pattern).
+              True upsert using the provisioning API:
+                - If uid exists → PUT  /api/v1/provisioning/contact-points/{uid}
+                - If not        → POST /api/v1/provisioning/contact-points
+              PUT is idempotent and never returns 409.
+              POST is only used on first creation.
               """
               filename = key.split("/")[-1]
               cp       = fetch_json(key)
               uid      = cp.get("uid")
 
-              # Try to delete existing one first for clean upsert
               if uid:
-                  grafana("DELETE",
+                  # Check if the contact point already exists
+                  check_status, _ = grafana(
+                      "GET",
                       f"/api/v1/provisioning/contact-points/{uid}", token)
 
+                  if check_status == 200:
+                      # Exists — update it with PUT (never returns 409)
+                      status, body = grafana(
+                          "PUT",
+                          f"/api/v1/provisioning/contact-points/{uid}", token, cp)
+                      success = status in (200, 202, 204)
+                      print(f"  {'OK' if success else 'FAIL'} [PUT {status}] {filename}: {body}")
+                      return success, uid, f"HTTP PUT {status}"
+
+              # Does not exist — create with POST
               status, body = grafana(
                   "POST", "/api/v1/provisioning/contact-points", token, cp)
               success = status in (200, 201, 202)
-              print(f"  {'OK' if success else 'FAIL'} [{status}] {filename}: {body}")
-              return success, body.get("uid", uid), f"HTTP {status}"
+              print(f"  {'OK' if success else 'FAIL'} [POST {status}] {filename}: {body}")
+              return success, body.get("uid", uid), f"HTTP POST {status}"
 
           def delete_contact_point(key, token):
               filename = key.split("/")[-1]
@@ -272,6 +285,7 @@ Resources:
       Tags:
         - Key: ManagedBy
           Value: CloudFormation
+
 
   # ---------------------------------------------------------------
   # 4. LAMBDA — Notification policies loader
@@ -414,6 +428,7 @@ Resources:
       Tags:
         - Key: ManagedBy
           Value: CloudFormation
+
 
   # ---------------------------------------------------------------
   # 5. LAMBDA — Alert rules loader
@@ -590,6 +605,7 @@ Resources:
       Tags:
         - Key: ManagedBy
           Value: CloudFormation
+
 
   # ---------------------------------------------------------------
   # 6. CUSTOM RESOURCES — trigger each Lambda.
