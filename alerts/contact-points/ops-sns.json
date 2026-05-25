@@ -4,7 +4,7 @@
   "type": "sns",
   "settings": {
     "authProvider": "default",
-    "topicArn": "${SNS_TOPIC_ARN}",
+    "topicArn": "arn:aws:sns:us-east-2:027934733062:grafana-development-alerts",
     "messageFormat": "json",
     "subject": "[{{ .Status | toUpper }}] EC2 i-0e9c981e03dfb6392 Alert"
   },
