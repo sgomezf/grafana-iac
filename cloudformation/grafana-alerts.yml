@@ -220,10 +220,10 @@ Resources:
 
               # Does not exist — create with POST
               status, body = grafana(
-                  "POST", "/api/v1/provisioning/contact-points", token, cp)
+                  "PUT", "/api/v1/provisioning/contact-points", token, cp)
               success = status in (200, 201, 202)
-              print(f"  {'OK' if success else 'FAIL'} [POST {status}] {filename}: {body}")
-              return success, body.get("uid", uid), f"HTTP POST {status}"
+              print(f"  {'OK' if success else 'FAIL'} [PUT {status}] {filename}: {body}")
+              return success, body.get("uid", uid), f"HTTP PUT {status}"
 
           def delete_contact_point(key, token):
               filename = key.split("/")[-1]
