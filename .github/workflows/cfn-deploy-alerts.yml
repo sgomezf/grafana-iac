@@ -204,6 +204,7 @@ jobs:
       - name: Substitute secrets into alert JSON files
         env:
           SNS_TOPIC_ARN: ${{ secrets.SNS_TOPIC_ARN }}
+          CLOUDWATCH_DATASOURCE_UID: "cloudwatch"
         run: |
           ALERTS_DIR="${{ env.ALERTS_DIR }}"
           echo "🔐 Substituting secrets into alert JSON files..."
