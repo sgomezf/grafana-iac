@@ -1,6 +1,6 @@
 {
   "name": "ec2-cpu",
-  "folderUID": "${ALERT_FOLDER_UID}",
+  "folderUID": "ffn2vokknwcu8b",
   "interval": "1m",
   "rules": [
     {
@@ -11,9 +11,9 @@
         {
           "refId": "A",
           "relativeTimeRange": { "from": 600, "to": 0 },
-          "datasourceUid": "${CLOUDWATCH_DATASOURCE_UID}",
+          "datasourceUid": "afn21xn16ry80e",
           "model": {
-            "dimensions": { "InstanceId": "${EC2_INSTANCE_ID}" },
+            "dimensions": { "InstanceId": "i-0e9c981e03dfb6392" },
             "metricName": "CPUUtilization",
             "namespace": "AWS/EC2",
             "period": "180",
@@ -84,7 +84,7 @@
       "execErrState": "Error",
       "for": "1m",
       "annotations": {
-        "summary": "EC2 instance ${EC2_INSTANCE_ID} CPU is above 30%"
+        "summary": "EC2 instance i-0e9c981e03dfb6392 CPU is above 30%"
       },
       "labels": {},
       "isPaused": false,
