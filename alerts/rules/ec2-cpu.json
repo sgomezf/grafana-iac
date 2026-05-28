@@ -20,27 +20,31 @@
                             },
                             "datasourceUid": "afn21xn16ry80e",
                             "model": {
+                                "datasource": {
+                                    "type": "cloudwatch",
+                                    "uid": "afn21xn16ry80e"
+                                },
                                 "dimensions": {
                                     "InstanceId": "i-0e9c981e03dfb6392"
                                 },
-                                "expression": "",
-                                "id": "",
-                                "intervalMs": 1000,
-                                "label": "",
-                                "logGroups": [],
-                                "matchExact": false,
-                                "maxDataPoints": 43200,
-                                "metricEditorMode": 0,
                                 "metricName": "CPUUtilization",
-                                "metricQueryType": 0,
                                 "namespace": "AWS/EC2",
                                 "period": "180",
-                                "queryLanguage": "CWLI",
+                                "statistic": "Average",
+                                "metricQueryType": 0,
+                                "metricEditorMode": 0,
                                 "queryMode": "Metrics",
-                                "refId": "A",
+                                "queryLanguage": "CWLI",
                                 "region": "default",
+                                "refId": "A",
+                                "intervalMs": 1000,
+                                "maxDataPoints": 43200,
+                                "matchExact": false,
+                                "logGroups": [],
+                                "expression": "",
                                 "sqlExpression": "",
-                                "statistic": "Sum"
+                                "label": "",
+                                "id": ""
                             }
                         },
                         {
@@ -51,6 +55,16 @@
                             },
                             "datasourceUid": "__expr__",
                             "model": {
+                                "type": "reduce",
+                                "reducer": "last",
+                                "expression": "A",
+                                "refId": "B",
+                                "datasource": {
+                                    "type": "__expr__",
+                                    "uid": "__expr__"
+                                },
+                                "intervalMs": 1000,
+                                "maxDataPoints": 43200,
                                 "conditions": [
                                     {
                                         "evaluator": {
@@ -69,17 +83,7 @@
                                         },
                                         "type": "query"
                                     }
-                                ],
-                                "datasource": {
-                                    "type": "__expr__",
-                                    "uid": "__expr__"
-                                },
-                                "expression": "A",
-                                "intervalMs": 1000,
-                                "maxDataPoints": 43200,
-                                "reducer": "last",
-                                "refId": "B",
-                                "type": "reduce"
+                                ]
                             }
                         },
                         {
@@ -90,6 +94,15 @@
                             },
                             "datasourceUid": "__expr__",
                             "model": {
+                                "type": "threshold",
+                                "expression": "B",
+                                "refId": "C",
+                                "datasource": {
+                                    "type": "__expr__",
+                                    "uid": "__expr__"
+                                },
+                                "intervalMs": 1000,
+                                "maxDataPoints": 43200,
                                 "conditions": [
                                     {
                                         "evaluator": {
@@ -110,133 +123,21 @@
                                         },
                                         "type": "query"
                                     }
-                                ],
-                                "datasource": {
-                                    "type": "__expr__",
-                                    "uid": "__expr__"
-                                },
-                                "expression": "B",
-                                "intervalMs": 1000,
-                                "maxDataPoints": 43200,
-                                "refId": "C",
-                                "type": "threshold"
-                            }
-                        }
-                    ],
-                    "noDataState": "NoData",
-                    "execErrState": "Error",
-                    "for": "1m",
-                    "isPaused": false,
-                    "notification_settings": {
-                        "receiver": "ops-sns"
-                    }
-                }
-            ]
-        },
-        {
-            "orgId": 1,
-            "name": "ec2-instance-down2",
-            "folder": "ec2-alerts",
-            "interval": "1m",
-            "rules": [
-                {
-                    "uid": "afn3gwsp16gw0a",
-                    "title": "EC2 Instance i-0e9c981e03dfb6392 Down",
-                    "condition": "B",
-                    "data": [
-                        {
-                            "refId": "A",
-                            "relativeTimeRange": {
-                                "from": 300,
-                                "to": 0
-                            },
-                            "datasourceUid": "afn21xn16ry80e",
-                            "model": {
-                                "datasource": {
-                                    "type": "cloudwatch",
-                                    "uid": "afn21xn16ry80e"
-                                },
-                                "dimensions": {
-                                    "InstanceId": "i-0e9c981e03dfb6392"
-                                },
-                                "expression": "",
-                                "hide": false,
-                                "id": "",
-                                "intervalMs": 1000,
-                                "label": "",
-                                "logGroups": [],
-                                "matchExact": false,
-                                "maxDataPoints": 43200,
-                                "metricEditorMode": 0,
-                                "metricName": "StatusCheckFailed",
-                                "metricQueryType": 0,
-                                "namespace": "AWS/EC2",
-                                "period": "",
-                                "queryLanguage": "CWLI",
-                                "queryMode": "Metrics",
-                                "refId": "A",
-                                "region": "default",
-                                "sqlExpression": "",
-                                "statistic": "Maximum"
-                            }
-                        },
-                        {
-                            "refId": "B",
-                            "relativeTimeRange": {
-                                "from": 300,
-                                "to": 0
-                            },
-                            "datasourceUid": "__expr__",
-                            "model": {
-                                "conditions": [
-                                    {
-                                        "evaluator": {
-                                            "params": [
-                                                1
-                                            ],
-                                            "type": "gt"
-                                        },
-                                        "operator": {
-                                            "type": "and"
-                                        },
-                                        "query": {
-                                            "params": [
-                                                "A"
-                                            ]
-                                        },
-                                        "reducer": {
-                                            "params": [],
-                                            "type": "last"
-                                        },
-                                        "type": "query"
-                                    }
-                                ],
-                                "datasource": {
-                                    "type": "__expr__",
-                                    "uid": "__expr__"
-                                },
-                                "expression": "A",
-                                "intervalMs": 1000,
-                                "maxDataPoints": 43200,
-                                "refId": "B",
-                                "type": "classic_conditions"
+                                ]
                             }
                         }
                     ],
                     "noDataState": "Alerting",
-                    "execErrState": "Alerting",
-                    "for": "2m",
+                    "execErrState": "Error",
+                    "for": "1m",
                     "annotations": {
-                        "description": "Instance i-0e9c981e03dfb6392 has failed its status check for more than 2 minutes. Immediate action required.",
-                        "runbook_url": "https://wiki.example.com/runbooks/ec2-instance-down",
-                        "summary": "EC2 instance i-0e9c981e03dfb6392 is down"
+                        "summary": "EC2 instance i-0e9c981e03dfb6392 CPU is above 30%"
                     },
-                    "labels": {
-                        "instance_id": "i-0e9c981e03dfb6392",
-                        "severity": "critical",
-                        "team": "ops"
-                    },
-                    "isPaused": false
+                    "labels": {},
+                    "isPaused": false,
+                    "notification_settings": {
+                        "receiver": "ops-sns"
+                    }
                 }
             ]
         }
