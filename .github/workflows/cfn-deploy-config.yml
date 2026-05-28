@@ -65,10 +65,10 @@ jobs:
           echo "✅ Template validation passed"
 
   # ------------------------------------------------------------------
-  # Deploy (create or update) the Gragana CloudFormation stack
+  # Deploy (create or update) the Gragana Configuration CloudFormation stack
   # ------------------------------------------------------------------
   deploy-grafana:
-    name: Deploy Grafana Workspace
+    name: Configure Grafana Workspace
     runs-on: ubuntu-latest
     needs: validate
     if: github.event.inputs.action != 'delete'

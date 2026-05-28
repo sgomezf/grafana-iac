@@ -1,0 +1,4 @@
+{
+  "name": "default-template",
+  "template": "{{ define \"default-template\" }}\n{{ if gt (len .Alerts.Firing) 0 }}\n🔴 *FIRING*\n{{ range .Alerts.Firing }}\n- *Alert:* {{ .Labels.alertname }}\n- *Instance:* {{ .Labels.InstanceId }}\n- *Summary:* {{ .Annotations.summary }}\n{{ end }}\n{{ end }}\n{{ if gt (len .Alerts.Resolved) 0 }}\n✅ *RESOLVED*\n{{ range .Alerts.Resolved }}\n- *Alert:* {{ .Labels.alertname }}\n- *Instance:* {{ .Labels.InstanceId }}\n{{ end }}\n{{ end }}\n{{ end }}"
+}

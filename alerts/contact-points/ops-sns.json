@@ -4,7 +4,10 @@
   "type": "sns",
   "settings": {
     "topic_arn": "${SNS_TOPIC_ARN}",
-    "subject": "[{{ .Status | toUpper }}] EC2 i-0e9c981e03dfb6392 Alert"
+    "subject": "[{{ .Status | toUpper }}] EC2 Alert"
+  },
+  "templates": {
+    "message": "{{ template \"default-template\" . }}"
   },
   "disableResolveMessage": false
 }
