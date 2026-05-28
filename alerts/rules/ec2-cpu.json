@@ -4,19 +4,19 @@
   "interval": "1m",
   "rules": [
     {
-      "uid": "efncz2upl3wg0f",
-      "title": "ec2-cpu",
+      "uid": "ec2-cpu-i-0e9c981e03dfb6392",
+      "title": "EC2 CPU Over 30% - i-0e9c981e03dfb6392",
       "condition": "C",
       "data": [
         {
           "refId": "A",
-          "relativeTimeRange": { "from": 600, "to": 0 },
+          "relativeTimeRange": { "from": 300, "to": 0 },
           "datasourceUid": "afn21xn16ry80e",
           "model": {
             "dimensions": { "InstanceId": "i-0e9c981e03dfb6392" },
             "metricName": "CPUUtilization",
             "namespace": "AWS/EC2",
-            "period": "180",
+            "period": "60",
             "statistic": "Average",
             "metricQueryType": 0,
             "metricEditorMode": 0,
@@ -26,7 +26,7 @@
             "refId": "A",
             "intervalMs": 1000,
             "maxDataPoints": 43200,
-            "matchExact": false,
+            "matchExact": true,
             "logGroups": [],
             "expression": "",
             "sqlExpression": "",
@@ -82,11 +82,15 @@
       ],
       "noDataState": "Alerting",
       "execErrState": "Error",
-      "for": "1m",
+      "for": "5m",
       "annotations": {
-        "summary": "EC2 instance i-0e9c981e03dfb6392 CPU is above 30%"
+        "summary": "EC2 instance i-0e9c981e03dfb6392 CPU utilization is above 30%",
+        "description": "Instance i-0e9c981e03dfb6392 has had CPU above 30% for more than 5 minutes. Current value: {{ $values.B.Value | printf \"%.2f\" }}%"
       },
-      "labels": {},
+      "labels": {
+        "severity": "warning",
+        "instance": "i-0e9c981e03dfb6392"
+      },
       "isPaused": false,
       "notification_settings": {
         "receiver": "ops-sns"
