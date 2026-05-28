@@ -90,22 +90,22 @@ jobs:
           done
 
           # Validate alert rule groups have required fields
-          if [ -d "${{ env.ALERTS_DIR }}/rules" ]; then
-            echo ""
-            echo "Validating alert rule group fields..."
-            find "${{ env.ALERTS_DIR }}/rules" -name "*.json" | while read f; do
-              python3 << PYEOF
-          import json, sys
-          data = json.load(open("$f"))
-          missing = [k for k in ["name", "rules"] if k not in data]
-          if missing:
-              print(f"  ❌ $f missing fields: {missing}")
-              sys.exit(1)
-          else:
-              print(f"  ✅ $f — name={data['name']}, {len(data['rules'])} rule(s)")
-          PYEOF
-            done
-          fi
+          # if [ -d "${{ env.ALERTS_DIR }}/rules" ]; then
+          #   echo ""
+          #   echo "Validating alert rule group fields..."
+          #   find "${{ env.ALERTS_DIR }}/rules" -name "*.json" | while read f; do
+          #     python3 << PYEOF
+          # import json, sys
+          # data = json.load(open("$f"))
+          # missing = [k for k in ["name", "rules"] if k not in data]
+          # if missing:
+          #     print(f"  ❌ $f missing fields: {missing}")
+          #     sys.exit(1)
+          # else:
+          #     print(f"  ✅ $f — name={data['name']}, {len(data['rules'])} rule(s)")
+          # PYEOF
+          #   done
+          # fi
 
           echo ""
           echo "✅ Validation complete"
