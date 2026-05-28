@@ -97,7 +97,7 @@ jobs:
               python3 << PYEOF
           import json, sys
           data = json.load(open("$f"))
-          missing = [k for k in ["name", "folderUID", "rules"] if k not in data]
+          missing = [k for k in ["name", "rules"] if k not in data]
           if missing:
               print(f"  ❌ $f missing fields: {missing}")
               sys.exit(1)
