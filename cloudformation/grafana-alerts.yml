@@ -749,6 +749,7 @@ Resources:
 
   LoadNotificationTemplates:
     Type: Custom::GrafanaNotificationTemplates
+    DependsOn: GrafanaContactPoints
     Properties:
       ServiceToken: !GetAtt TemplateLoaderFunction.Arn
       TemplatesVersion: !Ref TemplatesVersion   # bump to force re-invoke
