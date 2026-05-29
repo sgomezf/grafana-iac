@@ -701,6 +701,7 @@ Resources:
               try:
                   token = get_grafana_token()
                   keys = list_templates(bucket, prefix)
+                  print(f" Bucket {bucket} — Prefix {prefix} ")
 
                   if not keys:
                       print("⚠️  No template files found in S3 — nothing to do")
