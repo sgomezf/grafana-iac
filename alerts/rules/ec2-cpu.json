@@ -4,93 +4,124 @@
   "interval": "1m",
   "rules": [
     {
-      "uid": "ec2-cpu-i-0e9c981e03dfb6392",
-      "title": "EC2 CPU Over 30% - i-0e9c981e03dfb6392",
+      "uid": "efncz2upl3wg0f",
+      "title": "ec2-cpu2",
       "condition": "C",
       "data": [
         {
           "refId": "A",
-          "relativeTimeRange": { "from": 300, "to": 0 },
+          "relativeTimeRange": {
+            "from": 600,
+            "to": 0
+          },
           "datasourceUid": "afn21xn16ry80e",
           "model": {
-            "dimensions": { "InstanceId": "i-0e9c981e03dfb6392" },
-            "metricName": "CPUUtilization",
-            "namespace": "AWS/EC2",
-            "period": "60",
-            "statistic": "Average",
-            "metricQueryType": 0,
-            "metricEditorMode": 0,
-            "queryMode": "Metrics",
-            "queryLanguage": "CWLI",
-            "region": "default",
-            "refId": "A",
-            "intervalMs": 1000,
-            "maxDataPoints": 43200,
-            "matchExact": true,
-            "logGroups": [],
+            "dimensions": {
+              "InstanceId": "i-0e9c981e03dfb6392"
+            },
             "expression": "",
-            "sqlExpression": "",
+            "id": "",
+            "intervalMs": 1000,
             "label": "",
-            "id": ""
+            "logGroups": [],
+            "matchExact": false,
+            "maxDataPoints": 43200,
+            "metricEditorMode": 0,
+            "metricName": "CPUUtilization",
+            "metricQueryType": 0,
+            "namespace": "AWS/EC2",
+            "period": "180",
+            "queryLanguage": "CWLI",
+            "queryMode": "Metrics",
+            "refId": "A",
+            "region": "default",
+            "sqlExpression": "",
+            "statistic": "Sum"
           }
         },
         {
           "refId": "B",
-          "relativeTimeRange": { "from": 0, "to": 0 },
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
           "datasourceUid": "__expr__",
           "model": {
-            "type": "reduce",
-            "reducer": "last",
-            "expression": "A",
-            "refId": "B",
-            "datasource": { "type": "__expr__", "uid": "__expr__" },
-            "intervalMs": 1000,
-            "maxDataPoints": 43200,
             "conditions": [
               {
-                "evaluator": { "params": [], "type": "gt" },
-                "operator": { "type": "and" },
-                "query": { "params": [] },
-                "reducer": { "params": [], "type": "last" },
+                "evaluator": {
+                  "params": [],
+                  "type": "gt"
+                },
+                "operator": {
+                  "type": "and"
+                },
+                "query": {
+                  "params": []
+                },
+                "reducer": {
+                  "params": [],
+                  "type": "last"
+                },
                 "type": "query"
               }
-            ]
+            ],
+            "datasource": {
+              "type": "__expr__",
+              "uid": "__expr__"
+            },
+            "expression": "A",
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "reducer": "last",
+            "refId": "B",
+            "type": "reduce"
           }
         },
         {
           "refId": "C",
-          "relativeTimeRange": { "from": 0, "to": 0 },
+          "relativeTimeRange": {
+            "from": 0,
+            "to": 0
+          },
           "datasourceUid": "__expr__",
           "model": {
-            "type": "threshold",
-            "expression": "B",
-            "refId": "C",
-            "datasource": { "type": "__expr__", "uid": "__expr__" },
-            "intervalMs": 1000,
-            "maxDataPoints": 43200,
             "conditions": [
               {
-                "evaluator": { "params": [30], "type": "gt" },
-                "operator": { "type": "and" },
-                "query": { "params": [] },
-                "reducer": { "params": [], "type": "last" },
+                "evaluator": {
+                  "params": [
+                    30
+                  ],
+                  "type": "gt"
+                },
+                "operator": {
+                  "type": "and"
+                },
+                "query": {
+                  "params": []
+                },
+                "reducer": {
+                  "params": [],
+                  "type": "last"
+                },
                 "type": "query"
               }
-            ]
+            ],
+            "datasource": {
+              "type": "__expr__",
+              "uid": "__expr__"
+            },
+            "expression": "B",
+            "intervalMs": 1000,
+            "maxDataPoints": 43200,
+            "refId": "C",
+            "type": "threshold"
           }
         }
       ],
-      "noDataState": "Alerting",
+      "noDataState": "NoData",
       "execErrState": "Error",
-      "for": "5m",
-      "annotations": {
-        "summary": "EC2 instance i-0e9c981e03dfb6392 CPU utilization is above 30%",
-        "description": "Instance i-0e9c981e03dfb6392 has had CPU above 30% for more than 5 minutes. Current value: {{ $values.B.Value | printf \"%.2f\" }}%"
-      },
-      "labels": {
-        "severity": "warning",
-        "instance": "i-0e9c981e03dfb6392"
-      },
+      "for": "1m",
       "isPaused": false,
       "notification_settings": {
         "receiver": "ops-sns"
