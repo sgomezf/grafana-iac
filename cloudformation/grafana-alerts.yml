@@ -53,10 +53,6 @@ Parameters:
     Type: String
     Default: "notification-templates/"
   
-  TemplatesVersion:
-    Type: String
-    Default: "1"
-
   AlertsVersion:
     Type: String
     Default: "1"
@@ -752,7 +748,7 @@ Resources:
     DependsOn: GrafanaContactPoints
     Properties:
       ServiceToken: !GetAtt TemplateLoaderFunction.Arn
-      TemplatesVersion: !Ref TemplatesVersion   # bump to force re-invoke
+      AlertsVersion: !Ref AlertsVersion
 
   GrafanaNotificationPolicies:
     Type: Custom::GrafanaNotificationPolicies
