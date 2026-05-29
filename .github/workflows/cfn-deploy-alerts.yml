@@ -249,7 +249,7 @@ jobs:
           # Use the resolved copy — not the original repo folder
           ALERTS_DIR="/tmp/alerts-resolved"
 
-          for SUBDIR in contact-points rules notification-policies; do
+          for SUBDIR in contact-points rules notification-policies notification-templates; do
             LOCAL="${ALERTS_DIR}/${SUBDIR}/"
             S3_PATH="s3://${BUCKET}/alerts/${SUBDIR}/"
 
