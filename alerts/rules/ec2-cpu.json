@@ -23,29 +23,31 @@
         {
           "refId": "A",
           "relativeTimeRange": {
-            "from": 300,
+            "from": 600,
             "to": 0
           },
           "datasourceUid": "afn21xn16ry80e",
           "model": {
-            "alias": "CPU Utilization",
             "dimensions": {
-              "InstanceId": [
-                "i-0e9c981e03dfb6392"
-              ]
+              "InstanceId": "i-0e9c981e03dfb6392"
             },
             "expression": "",
-            "highResolution": false,
             "id": "",
-            "matchExact": true,
+            "intervalMs": 1000,
+            "label": "",
+            "logGroups": [],
+            "matchExact": false,
+            "maxDataPoints": 43200,
+            "metricEditorMode": 0,
             "metricName": "CPUUtilization",
             "metricQueryType": 0,
-            "metricEditorMode": 0,
             "namespace": "AWS/EC2",
-            "period": "60",
+            "period": "180",
+            "queryLanguage": "CWLI",
             "queryMode": "Metrics",
             "refId": "A",
             "region": "default",
+            "sqlExpression": "",
             "statistic": "Sum"
           }
         },
@@ -60,18 +62,14 @@
             "conditions": [
               {
                 "evaluator": {
-                  "params": [
-                    1
-                  ],
+                  "params": [],
                   "type": "gt"
                 },
                 "operator": {
                   "type": "and"
                 },
                 "query": {
-                  "params": [
-                    "A"
-                  ]
+                  "params": []
                 },
                 "reducer": {
                   "params": [],
@@ -87,14 +85,15 @@
             "expression": "A",
             "intervalMs": 1000,
             "maxDataPoints": 43200,
+            "reducer": "last",
             "refId": "B",
-            "type": "classic_conditions"
+            "type": "reduce"
           }
         },
         {
           "refId": "C",
           "relativeTimeRange": {
-            "from": 300,
+            "from": 0,
             "to": 0
           },
           "datasourceUid": "__expr__",
@@ -103,7 +102,7 @@
               {
                 "evaluator": {
                   "params": [
-                    0
+                    30
                   ],
                   "type": "gt"
                 },
@@ -111,9 +110,7 @@
                   "type": "and"
                 },
                 "query": {
-                  "params": [
-                    "B"
-                  ]
+                  "params": []
                 },
                 "reducer": {
                   "params": [],
