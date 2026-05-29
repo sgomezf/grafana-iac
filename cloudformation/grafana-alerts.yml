@@ -51,7 +51,7 @@ Parameters:
 
   TemplatesPrefix:
     Type: String
-    Default: "notification-templates/"
+    Default: "alerts/notification-templates/"
   
   AlertsVersion:
     Type: String
