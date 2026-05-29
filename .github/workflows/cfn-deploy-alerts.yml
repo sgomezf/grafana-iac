@@ -335,6 +335,7 @@ jobs:
               AlertRulesPrefix="alerts/rules/" \
               ContactPointsPrefix="alerts/contact-points/" \
               NotificationPoliciesPrefix="alerts/notification-policies/" \
+              TemplatesPrefix="alerts/notification-templates/" \
               AlertsVersion="${{ steps.version.outputs.version }}" \
             --tags \
               Environment="${ENV}" \
